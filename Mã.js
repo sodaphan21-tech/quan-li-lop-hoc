@@ -141,8 +141,8 @@ function saveStudent(sessionToken, payload) {
     TrangThai: status,
     GhiChu: cleanText_(payload.GhiChu, 1000)
   };
-
   return withWriteLock_(function () {
+    assertStudentUsernameAvailable_(record.MaHS);
     assertStudentAccountCapacity_(record.MaHS);
     const saved = upsertRow_('HocSinh', record);
     const initialCredentials = createStudentAccount_(saved, config);
@@ -668,6 +668,23 @@ function withWriteLock_(callback) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function assertStudentUsernameAvailable_(studentId) {
+  const username = normalizeUsername_(studentId);
+  if (!username) {
+    throw new Error('Mã học sinh cần gồm ít nhất 3 kí tự Latin, số, dấu chấm, gạch ngang hoặc gạch dưới để dùng làm tên đăng nhập.');
+  }
+  if (username === 'giaovien') throw new Error('Mã đăng nhập giaovien đã dành riêng cho tài khoản giáo viên.');
+
+  const account = findAccount_(username);
+  if (account && (account.role !== 'HOCSINH' || account.studentId !== String(studentId))) {
+    throw new Error('Mã học sinh này trùng với một tài khoản khác. Hãy dùng mã học sinh duy nhất.');
+  }
+  const duplicate = readRows_('HocSinh').some(function (student) {
+    return String(student.MaHS) !== String(studentId) && normalizeUsername_(student.MaHS) === username;
+  });
+  if (duplicate) throw new Error('Mã đăng nhập bị trùng với học sinh khác. Hãy dùng mã học sinh duy nhất.');
 }
 
 function today_() {
