@@ -163,11 +163,15 @@ function importStudents(sessionToken, payload) {
   if (input.length > 40) throw new Error('Mỗi lần chỉ nhập tối đa 40 học sinh.');
 
   return withWriteLock_(function () {
-    const config = readConfig_();
+    const ss = spreadsheet_();
+    const config = readConfig_(ss);
     const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
     const statusOptions = labels_(config, LOOKUP_KEYS.student);
-    const existingRows = readRows_('HocSinh');
-    const accounts = readAccounts_();
+    const studentSheet = ss.getSheetByName('HocSinh');
+    if (!studentSheet) throw new Error('Không tìm thấy sheet HocSinh.');
+    const accountSheet = accountSheet_(ss);
+    const existingRows = readRows_('HocSinh', ss);
+    const accounts = readAccounts_(accountSheet);
     const existingUsernames = {};
     existingRows.forEach(function (row) {
       const username = normalizeUsername_(row.MaHS);
@@ -224,18 +228,73 @@ function importStudents(sessionToken, payload) {
       throw new Error('Danh sách này cần thêm ' + accountsNeeded + ' tài khoản đang học, nhưng ứng dụng chỉ hỗ trợ tối đa 40 tài khoản học sinh.');
     }
 
+    const now = new Date();
     const credentials = [];
+    const accountRows = [];
     prepared.forEach(function (student) {
-      const saved = upsertRow_('HocSinh', student);
-      const issued = createStudentAccount_(saved, config);
-      if (issued) {
-        credentials.push({
-          username: issued.username,
-          password: issued.password,
-          displayName: saved.HoTen
-        });
-      }
+      if (student.TrangThai !== activeLabel) return;
+
+      const username = normalizeUsername_(student.MaHS);
+      const password = generateTemporaryPassword_();
+      const salt = newSalt_();
+      const account = {
+        TenDangNhap: username,
+        VaiTro: 'HOCSINH',
+        MaHS: student.MaHS,
+        HoTen: student.HoTen,
+        Salt: salt,
+        MatKhauHash: hashPassword_(password, salt),
+        TrangThai: 'ACTIVE',
+        DoiMatKhau: true,
+        SoLanSai: 0,
+        KhoaDen: '',
+        PhienBan: 1,
+        TaoLuc: now,
+        CapNhatLuc: now
+      };
+      accountRows.push(AUTH.headers.map(function (header) { return account[header]; }));
+      credentials.push({ username: username, password: password, displayName: student.HoTen });
     });
+
+    const studentRows = prepared.map(function (student) {
+      return TABLES.HocSinh.headers.map(function (header) {
+        if (header === 'TaoLuc' || header === 'CapNhatLuc') return now;
+        return toSheetValue_(header, student[header]);
+      });
+    });
+    const studentStartRow = Math.max(2, studentSheet.getLastRow() + 1);
+    const studentRange = studentSheet.getRange(studentStartRow, 1, studentRows.length, TABLES.HocSinh.headers.length);
+    let accountRange = null;
+    if (accountRows.length) {
+      const accountStartRow = Math.max(2, accountSheet.getLastRow() + 1);
+      accountRange = accountSheet.getRange(accountStartRow, 1, accountRows.length, AUTH.headers.length);
+    }
+
+    // Both tabs are append-only for this import. If either write fails, clear the
+    // newly appended ranges so the user can safely correct the issue and retry.
+    let accountWriteAttempted = false;
+    let studentWriteAttempted = false;
+    try {
+      if (accountRange) {
+        accountWriteAttempted = true;
+        accountRange.setValues(accountRows);
+      }
+      studentWriteAttempted = true;
+      studentRange.setValues(studentRows);
+    } catch (error) {
+      let rollbackFailed = false;
+      if (studentWriteAttempted) {
+        try { studentRange.clearContent(); } catch (rollbackError) { rollbackFailed = true; }
+      }
+      if (accountWriteAttempted) {
+        try { accountRange.clearContent(); } catch (rollbackError) { rollbackFailed = true; }
+      }
+      if (rollbackFailed) {
+        throw new Error('Lượt nhập gặp lỗi và không thể tự hoàn tác hoàn toàn. Hãy kiểm tra sheet HocSinh và TaiKhoan trước khi nhập lại.');
+      }
+      throw new Error('Không thể lưu danh sách học sinh: ' + error.message);
+    }
+
     return {
       added: prepared.length,
       accountsCreated: credentials.length,
@@ -526,8 +585,9 @@ function spreadsheet_() {
   return SpreadsheetApp.openById(APP.spreadsheetId);
 }
 
-function readConfig_() {
-  const sheet = spreadsheet_().getSheetByName('CauHinh');
+function readConfig_(spreadsheet) {
+  const ss = spreadsheet || spreadsheet_();
+  const sheet = ss.getSheetByName('CauHinh');
   if (!sheet) throw new Error('Không tìm thấy sheet CauHinh.');
   const lastRow = sheet.getLastRow();
   const values = lastRow ? sheet.getRange(1, 1, lastRow, 11).getValues() : [];
@@ -551,10 +611,11 @@ function readConfig_() {
   return { settings: settings, lookups: lookups };
 }
 
-function readRows_(tableName) {
+function readRows_(tableName, spreadsheet) {
   const schema = TABLES[tableName];
   if (!schema) throw new Error('Bảng dữ liệu không hợp lệ: ' + tableName);
-  const sheet = spreadsheet_().getSheetByName(tableName);
+  const ss = spreadsheet || spreadsheet_();
+  const sheet = ss.getSheetByName(tableName);
   if (!sheet) throw new Error('Không tìm thấy sheet ' + tableName + '.');
   const lastRow = sheet.getLastRow();
   if (lastRow < 1) throw new Error('Sheet ' + tableName + ' chưa có hàng tiêu đề.');
@@ -570,13 +631,15 @@ function readRows_(tableName) {
   const values = sheet.getRange(2, 1, lastRow - 1, schema.headers.length).getValues();
   return values.filter(function (row) {
     return row.some(function (cell) { return cell !== '' && cell !== null; });
-  }).map(function (row) {
-    const result = {};
-    schema.headers.forEach(function (header, index) {
-      result[header] = toClientValue_(header, row[index]);
-    });
-    return result;
+  }).map(function (row) { return rowToRecord_(schema, row); });
+}
+
+function rowToRecord_(schema, row) {
+  const result = {};
+  schema.headers.forEach(function (header, index) {
+    result[header] = toClientValue_(header, row[index]);
   });
+  return result;
 }
 
 function upsertRow_(tableName, record) {
@@ -623,7 +686,7 @@ function upsertRow_(tableName, record) {
     row[schema.headers.indexOf('CapNhatLuc')] = now;
   }
   sheet.getRange(rowNumber, 1, 1, schema.headers.length).setValues([row]);
-  return readRows_(tableName).find(function (item) { return item[schema.key] === id; }) || record;
+  return rowToRecord_(schema, row);
 }
 
 function upsertAttendanceDetails_(sessionId, records) {
