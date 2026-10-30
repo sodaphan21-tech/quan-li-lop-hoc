@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7fb">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span>QL</span></div>
+        <div class="brand-copy"><strong>Classroom</strong><small>QUẢN LÍ LỚP HỌC</small></div>
+        <button class="icon-button sidebar-close" id="sidebarClose" type="button" aria-label="Đóng menu">×</button>
+      </div>
+
+      <div class="class-switcher">
+        <div class="class-avatar" id="classAvatar">L</div>
+        <div class="class-copy"><span>Lớp đang quản lí</span><strong id="className">Đang tải…</strong></div>
+        <span class="switcher-dot"></span>
+      </div>
+
+      <div class="nav-label">KHÔNG GIAN LÀM VIỆC</div>
+      <nav class="main-nav" aria-label="Điều hướng chính">
+        <button class="nav-item active" data-view="dashboard" type="button"><span class="nav-icon" data-icon="home"></span><span>Tổng quan</span></button>
+        <button class="nav-item" data-view="students" type="button"><span class="nav-icon" data-icon="users"></span><span>Học sinh</span></button>
+        <button class="nav-item" data-view="assignments" type="button"><span class="nav-icon" data-icon="book"></span><span>Bài tập</span></button>
+        <button class="nav-item" data-view="submissions" type="button"><span class="nav-icon" data-icon="check"></span><span>Bài nộp</span></button>
+        <button class="nav-item" data-view="attendance" type="button"><span class="nav-icon" data-icon="calendar"></span><span>Điểm danh</span></button>
+        <button class="nav-item" data-view="announcements" type="button"><span class="nav-icon" data-icon="bell"></span><span>Thông báo</span></button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="privacy-note"><span class="privacy-dot"></span><div><strong>Không gian riêng tư</strong><small>Dữ liệu lưu trong Google Sheets</small></div></div>
+        <div class="user-card"><div class="user-avatar">GV</div><div><strong id="teacherName">Giáo viên</strong><small>Quản trị lớp học</small></div></div>
+      </div>
+    </aside>
+
+    <div class="mobile-scrim" id="mobileScrim"></div>
+    <main class="main-area">
+      <header class="topbar">
+        <button class="icon-button menu-toggle" id="menuToggle" type="button" aria-label="Mở menu"><span class="hamburger"></span></button>
+        <div class="heading-group"><div class="breadcrumb"><span>Không gian làm việc</span><span class="crumb-separator">/</span><span id="breadcrumbCurrent">Tổng quan</span></div><h1 id="pageTitle">Tổng quan</h1></div>
+        <div class="topbar-actions"><div class="date-chip"><span class="date-dot"></span><span id="todayLabel">Hôm nay</span></div><button class="button button-quiet" id="refreshButton" type="button"><span class="refresh-icon">↻</span><span>Làm mới</span></button> <button class="button button-quiet" id="themeToggle" type="button"
+        aria-label="Chuyển sang giao diện tối"
+        title="Chuyển sang giao diện tối">
+  <span class="refresh-icon" id="themeIcon">☾</span>
+  <span id="themeLabel">Giao diện tối</span>
+</button> </div>
+      </header>
+      <section id="pageContent" class="page-content" aria-live="polite"></section>
+      <footer class="app-footer"><span>Quản lí lớp học</span><span>Dữ liệu được lưu trực tiếp trong bảng tính của bạn</span></footer>
+    </main>
+  </div>
+  <div id="modalRoot"></div>
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+  <?!= include('Scripts'); ?>
+</body>
+</html>
