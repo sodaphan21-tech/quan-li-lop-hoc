@@ -54,67 +54,71 @@ function logout(sessionToken) {
 
 /** Public RPC: change the current user's password, including first-login setup. */
 function changePassword(sessionToken, currentPassword, newPassword) {
-  const account = requireAuth_(sessionToken, null, true);
   const current = currentPassword == null ? '' : String(currentPassword);
   const next = newPassword == null ? '' : String(newPassword);
-  if (!passwordMatches_(current, account.salt, account.passwordHash)) {
-    throw new Error('Mật khẩu hiện tại chưa đúng.');
-  }
-  if (next.length < 10 || next.length > 128) {
-    throw new Error('Mật khẩu mới cần có từ 10 đến 128 ký tự.');
-  }
-  if (next === current) throw new Error('Mật khẩu mới phải khác mật khẩu hiện tại.');
+  return withWriteLock_(function () {
+    const account = requireAuth_(sessionToken, null, true);
+    if (!passwordMatches_(current, account.salt, account.passwordHash)) {
+      throw new Error('Mật khẩu hiện tại chưa đúng.');
+    }
+    if (next.length < 10 || next.length > 128) {
+      throw new Error('Mật khẩu mới cần có từ 10 đến 128 ký tự.');
+    }
+    if (next === current) throw new Error('Mật khẩu mới phải khác mật khẩu hiện tại.');
 
-  account.salt = newSalt_();
-  account.passwordHash = hashPassword_(next, account.salt);
-  account.mustChangePassword = false;
-  account.sessionVersion += 1;
-  account.updatedAt = new Date();
-  writeAccount_(account);
+    account.salt = newSalt_();
+    account.passwordHash = hashPassword_(next, account.salt);
+    account.mustChangePassword = false;
+    account.sessionVersion += 1;
+    account.updatedAt = new Date();
+    writeAccount_(account);
 
-  CacheService.getScriptCache().remove(sessionCacheKey_(sessionToken));
-  return createSessionResponse_(account);
+    CacheService.getScriptCache().remove(sessionCacheKey_(sessionToken));
+    return createSessionResponse_(account);
+  });
 }
 
 /** Public RPC: create a new temporary password for one student. */
 function resetStudentPassword(sessionToken, studentId) {
-  requireAuth_(sessionToken, 'GIAOVIEN', false);
-  const id = cleanText_(studentId, 60);
-  const student = findById_('HocSinh', 'MaHS', id);
-  if (!student) throw new Error('Không tìm thấy học sinh cần đặt lại mật khẩu.');
-  const config = readConfig_();
-  if (student.TrangThai !== label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học')) {
-    throw new Error('Chỉ có thể cấp mật khẩu cho học sinh đang học.');
-  }
+  return withWriteLock_(function () {
+    requireAuth_(sessionToken, 'GIAOVIEN', false);
+    const id = cleanText_(studentId, 60);
+    const student = findById_('HocSinh', 'MaHS', id);
+    if (!student) throw new Error('Không tìm thấy học sinh cần đặt lại mật khẩu.');
+    const config = readConfig_();
+    if (student.TrangThai !== label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học')) {
+      throw new Error('Chỉ có thể cấp mật khẩu cho học sinh đang học.');
+    }
 
-  let account = findAccount_(normalizeUsername_(id));
-  if (!account) {
-    const issued = createStudentAccount_(student, config);
-    if (!issued) throw new Error('Không thể tạo tài khoản cho học sinh này.');
+    let account = findAccount_(normalizeUsername_(id));
+    if (!account) {
+      const issued = createStudentAccount_(student, config);
+      if (!issued) throw new Error('Không thể tạo tài khoản cho học sinh này.');
+      return {
+        username: issued.username,
+        password: issued.password,
+        displayName: student.HoTen,
+        message: 'Đã tạo tài khoản học sinh.'
+      };
+    }
+
+    const temporaryPassword = generateTemporaryPassword_();
+    account.salt = newSalt_();
+    account.passwordHash = hashPassword_(temporaryPassword, account.salt);
+    account.mustChangePassword = true;
+    account.sessionVersion += 1;
+    account.status = 'ACTIVE';
+    account.displayName = student.HoTen;
+    account.updatedAt = new Date();
+    writeAccount_(account);
+
     return {
-      username: issued.username,
-      password: issued.password,
-      displayName: student.HoTen,
-      message: 'Đã tạo tài khoản học sinh.'
+      username: account.username,
+      password: temporaryPassword,
+      displayName: account.displayName,
+      message: 'Đã đặt lại mật khẩu tạm.'
     };
-  }
-
-  const temporaryPassword = generateTemporaryPassword_();
-  account.salt = newSalt_();
-  account.passwordHash = hashPassword_(temporaryPassword, account.salt);
-  account.mustChangePassword = true;
-  account.sessionVersion += 1;
-  account.status = 'ACTIVE';
-  account.displayName = student.HoTen;
-  account.updatedAt = new Date();
-  writeAccount_(account);
-
-  return {
-    username: account.username,
-    password: temporaryPassword,
-    displayName: account.displayName,
-    message: 'Đã đặt lại mật khẩu tạm.'
-  };
+  });
 }
 
 /** Public RPC: return only the signed-in student's own assignments, notices, and attendance. */
@@ -298,15 +302,18 @@ function initializeLoginSystem_() {
 
 /** Private recovery: run manually from the Apps Script editor if the teacher loses access. */
 function resetTeacherPassword_() {
-  const account = findAccount_('giaovien');
-  if (!account) throw new Error('Chưa có tài khoản giáo viên. Hãy chạy initializeLoginSystem_ trước.');
-  const temporaryPassword = generateTemporaryPassword_();
-  account.salt = newSalt_();
-  account.passwordHash = hashPassword_(temporaryPassword, account.salt);
-  account.mustChangePassword = true;
-  account.sessionVersion += 1;
-  account.updatedAt = new Date();
-  writeAccount_(account);
+  const temporaryPassword = withWriteLock_(function () {
+    const account = findAccount_('giaovien');
+    if (!account) throw new Error('Chưa có tài khoản giáo viên. Hãy chạy initializeLoginSystem_ trước.');
+    const password = generateTemporaryPassword_();
+    account.salt = newSalt_();
+    account.passwordHash = hashPassword_(password, account.salt);
+    account.mustChangePassword = true;
+    account.sessionVersion += 1;
+    account.updatedAt = new Date();
+    writeAccount_(account);
+    return password;
+  });
   Logger.log('Tên đăng nhập: giaovien\nMật khẩu tạm mới: ' + temporaryPassword);
   return 'Đã đặt lại mật khẩu giáo viên. Mở Nhật ký thực thi để xem mật khẩu tạm.';
 }
