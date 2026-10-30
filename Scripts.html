@@ -2,8 +2,8 @@
 (function () {
   'use strict';
 
-  var state = { view: 'dashboard', bootstrap: null, students: [], assignments: [], announcements: [], attendance: null, submissions: null };
-  var titles = { dashboard: 'Tổng quan', students: 'Học sinh', assignments: 'Bài tập', submissions: 'Bài nộp', attendance: 'Điểm danh', announcements: 'Thông báo' };
+  var state = { view: 'dashboard', bootstrap: null, students: [], assignments: [], announcements: [], attendance: null, submissions: null, auth: null, studentPortal: null };
+  var titles = { dashboard: 'Tổng quan', students: 'Học sinh', assignments: 'Bài tập', submissions: 'Bài nộp', attendance: 'Điểm danh', announcements: 'Thông báo', 'student-home': 'Trang của em', 'student-assignments': 'Bài tập của em', 'student-attendance': 'Điểm danh', 'student-announcements': 'Thông báo lớp' };
   var icons = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-6h-4v6H4a1 1 0 0 1-1-1z"/></svg>',
     users: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
@@ -22,10 +22,71 @@
   function callServer(name, args) {
     return new Promise(function (resolve, reject) {
       var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) {
-        reject(new Error(error && error.message ? error.message : String(error)));
+        var message = error && error.message ? error.message : String(error);
+        if (name !== 'login' && /phiên đăng nhập/i.test(message)) showLogin('Phiên đăng nhập hết hạn. Hãy đăng nhập lại.');
+        reject(new Error(message));
       });
-      runner[name].apply(runner, args || []);
+      var callArgs = args || [];
+      if (name !== 'login') {
+        if (!state.auth || !state.auth.token) { reject(new Error('Bạn cần đăng nhập lại.')); return; }
+        callArgs = [state.auth.token].concat(callArgs);
+      }
+      runner[name].apply(runner, callArgs);
     });
+  }
+
+  function showLogin(message) {
+    state.auth = null;
+    state.studentPortal = null;
+    sessionStorage.removeItem('qlh_session');
+    document.getElementById('appShell').classList.add('hidden');
+    document.getElementById('passwordScreen').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('loginError').textContent = message || '';
+    document.getElementById('loginPassword').value = '';
+  }
+
+  function showPasswordScreen() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appShell').classList.add('hidden');
+    document.getElementById('passwordScreen').classList.remove('hidden');
+    document.getElementById('passwordError').textContent = '';
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
+  }
+
+  function startAuthenticatedApp() {
+    var user = state.auth.user;
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('passwordScreen').classList.add('hidden');
+    document.getElementById('appShell').classList.remove('hidden');
+    document.querySelectorAll('[data-role-nav]').forEach(function (node) {
+      node.classList.toggle('hidden', node.dataset.roleNav !== user.role);
+    });
+    document.getElementById('userName').textContent = user.HoTen || user.username;
+    document.getElementById('userRole').textContent = user.role === 'GIAOVIEN' ? 'Giáo viên · Quản trị' : 'Học sinh · ' + (user.MaHS || user.username);
+    document.getElementById('userAvatar').textContent = initials(user.HoTen || user.username);
+    document.getElementById('classLabel').textContent = user.role === 'GIAOVIEN' ? 'Lớp đang quản lí' : 'Lớp của em';
+    document.getElementById('navLabel').textContent = user.role === 'GIAOVIEN' ? 'KHÔNG GIAN LÀM VIỆC' : 'CỔNG HỌC SINH';
+    document.getElementById('privacyTitle').textContent = user.role === 'GIAOVIEN' ? 'Quản trị lớp học' : 'Tài khoản học sinh';
+    document.getElementById('privacyText').textContent = user.role === 'GIAOVIEN' ? 'Không chia sẻ bảng tính cho học sinh' : 'Chỉ hiển thị dữ liệu của tài khoản này';
+    if (user.role === 'GIAOVIEN') loadBootstrap();
+    else navigate('student-home');
+  }
+
+  function acceptSession(response) {
+    state.auth = { token: response.token, user: response.user, mustChangePassword: response.mustChangePassword };
+    sessionStorage.setItem('qlh_session', response.token);
+    if (response.mustChangePassword) showPasswordScreen();
+    else startAuthenticatedApp();
+  }
+
+  function restoreSession() {
+    var token = sessionStorage.getItem('qlh_session');
+    if (!token) { showLogin(''); return; }
+    state.auth = { token: token };
+    callServer('getSessionInfo').then(acceptSession).catch(function () { showLogin('Phiên đăng nhập hết hạn. Hãy đăng nhập lại.'); });
   }
   function toast(message, type) {
     var stack = document.getElementById('toastStack');
@@ -92,7 +153,6 @@
       state.bootstrap = data;
       document.getElementById('className').textContent = data.className || 'Lớp học';
       document.getElementById('classAvatar').textContent = initials(data.className || 'Lớp');
-      document.getElementById('teacherName').textContent = data.teacherName || 'Giáo viên';
       document.getElementById('todayLabel').textContent = dateLabel(data.today);
       setHeader();
       renderDashboard(data);
@@ -100,12 +160,26 @@
   }
   function navigate(view) {
     if (!titles[view]) return;
+    var role = state.auth && state.auth.user && state.auth.user.role;
+    var isStudentView = view.indexOf('student-') === 0;
+    if ((role === 'HOCSINH' && !isStudentView) || (role === 'GIAOVIEN' && isStudentView)) return;
     state.view = view;
     setHeader();
     closeSidebar();
     loading('Đang tải ' + titles[view].toLocaleLowerCase('vi') + '…');
 
     var task;
+    if (isStudentView) {
+      task = callServer('getStudentPortalData').then(function (data) {
+        state.studentPortal = data;
+        document.getElementById('className').textContent = data.className || 'Lớp học';
+        document.getElementById('classAvatar').textContent = initials(data.className || 'Lớp');
+        document.getElementById('todayLabel').textContent = dateLabel(data.today);
+        renderStudentView(view, data);
+      });
+      task.catch(errorPage);
+      return;
+    }
     if (view === 'dashboard') task = callServer('getBootstrap').then(function (data) { state.bootstrap = data; renderDashboard(data); });
     if (view === 'students') task = callServer('getStudents').then(function (data) { state.students = data; renderStudents(); });
     if (view === 'assignments') task = callServer('getAssignments').then(function (data) { state.assignments = data; renderAssignments(); });
@@ -132,6 +206,46 @@
         '<section class="panel"><div class="panel-header"><div><h3>Thông báo mới</h3><p>Tin đang có hiệu lực</p></div><button class="panel-link" data-view-link="announcements">Xem tất cả →</button></div><div class="panel-body">' + announcementFeed(announcements) + '</div></section>' +
       '</div>';
   }
+
+  function renderStudentView(view, data) {
+    if (view === 'student-home') renderStudentHome(data);
+    if (view === 'student-assignments') renderStudentAssignments(data);
+    if (view === 'student-attendance') renderStudentAttendance(data);
+    if (view === 'student-announcements') renderStudentAnnouncements(data);
+  }
+  function renderStudentHome(data) {
+    var pending = (data.assignments || []).filter(function (row) { return /chua nop/i.test(normalize(row.TrangThaiNop)); }).length;
+    var next = (data.assignments || []).slice(0, 4);
+    var notices = (data.announcements || []).slice(0, 4);
+    document.getElementById('pageContent').innerHTML =
+      '<div class="page-intro"><div><h2>Chào ' + esc(data.student.HoTen) + '</h2><p>Đây là bài tập, thông báo và điểm danh của riêng em.</p></div></div>' +
+      '<div class="role-card-grid"><article class="role-info-card"><strong>' + esc(data.student.MaHS) + '</strong><span>Mã đăng nhập học sinh</span></article><article class="role-info-card"><strong>' + esc(data.className || data.student.Lop || 'Lớp học') + '</strong><span>Lớp của em</span></article><article class="role-info-card"><strong>' + esc(pending) + ' bài</strong><span>Bài tập chưa nộp</span></article></div>' +
+      '<div class="dashboard-grid"><section class="panel"><div class="panel-header"><div><h3>Bài tập gần hạn</h3><p>Bài tập được giao cho em</p></div><button class="panel-link" data-view-link="student-assignments">Xem tất cả →</button></div><div class="panel-body">' + (next.length ? next.map(function (row) { return '<div class="list-row"><span class="list-dot"></span><div class="list-row-main"><strong>' + esc(row.TieuDe) + '</strong><small>' + esc(row.MonHoc || 'Chưa phân môn') + ' · ' + esc(row.TrangThaiNop || '') + '</small></div><div class="list-row-side">Hạn ' + dateLabel(row.HanNop) + '</div></div>'; }).join('') : emptyTable('Chưa có bài tập', 'Bài tập mới sẽ xuất hiện tại đây.')) + '</div></section>' +
+      '<section class="panel"><div class="panel-header"><div><h3>Thông báo lớp</h3><p>Tin mới nhất dành cho em</p></div><button class="panel-link" data-view-link="student-announcements">Xem tất cả →</button></div><div class="panel-body">' + (notices.length ? announcementFeed(notices) : emptyTable('Chưa có thông báo', 'Thông báo mới sẽ xuất hiện tại đây.')) + '</div></section></div>';
+  }
+  function renderStudentAssignments(data) {
+    var rows = data.assignments || [];
+    document.getElementById('pageContent').innerHTML =
+      '<div class="page-intro"><div><h2>Bài tập của em</h2><p>Chỉ em và giáo viên mới xem được bài nộp này.</p></div><span class="date-small">Tổng: ' + rows.length + ' bài</span></div>' +
+      (rows.length ? rows.map(function (row) {
+        var link = /^https?:\/\//i.test(row.LinkTaiLieu || '') ? '<a class="button button-quiet button-small" href="' + esc(row.LinkTaiLieu) + '" target="_blank" rel="noopener noreferrer">Mở tài liệu</a>' : '';
+        var submit = row.CoTheNop ? '<button class="button button-primary button-small" data-action="submit-own-assignment" data-id="' + esc(row.MaBai) + '">' + (row.LinkBaiNop ? 'Cập nhật bài nộp' : 'Nộp bài') + '</button>' : '<span class="date-small">Bài tập đã đóng</span>';
+        return '<article class="student-assignment-card"><div class="student-assignment-top"><div class="student-assignment-main"><h3>' + esc(row.TieuDe) + '</h3><div class="student-assignment-meta"><span>' + esc(row.MonHoc || 'Chưa phân môn') + '</span><span>Hạn: ' + dateLabel(row.HanNop) + '</span><span>' + esc(row.CachNop || 'Chưa ghi cách nộp') + '</span></div><p>' + esc(row.YeuCau || 'Giáo viên chưa ghi yêu cầu chi tiết.') + '</p>' + (row.LinkBaiNop ? '<div class="student-assignment-meta"><span>' + pill(row.TrangThaiNop) + '</span><a href="' + esc(row.LinkBaiNop) + '" target="_blank" rel="noopener noreferrer">Xem bài em đã nộp</a></div>' : '<div class="student-assignment-meta">' + pill(row.TrangThaiNop) + '</div>') + (row.NhanXet ? '<p><strong>Nhận xét của giáo viên:</strong> ' + esc(row.NhanXet) + '</p>' : '') + '</div><div class="row-actions">' + link + submit + '</div></div></article>';
+      }).join('') : '<section class="panel">' + emptyTable('Chưa có bài tập', 'Khi giáo viên giao bài, em sẽ thấy tại đây.') + '</section>');
+  }
+  function renderStudentAttendance(data) {
+    var rows = data.attendance || [];
+    document.getElementById('pageContent').innerHTML = '<div class="page-intro"><div><h2>Điểm danh của em</h2><p>Chỉ hiển thị kết quả điểm danh của tài khoản này.</p></div></div><section class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Ngày</th><th>Buổi / nội dung</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>' + (rows.length ? rows.map(function (row) { return '<tr><td>' + dateLabel(row.Ngay) + '</td><td>' + esc(row.TietHoacNoiDung || '—') + '</td><td>' + pill(row.TrangThai) + '</td><td>' + esc(row.GhiChu || '—') + '</td></tr>'; }).join('') : '<tr><td colspan="4">' + emptyTable('Chưa có dữ liệu điểm danh', 'Giáo viên chưa ghi nhận buổi học nào.') + '</td></tr>') + '</tbody></table></div></section>';
+  }
+  function renderStudentAnnouncements(data) {
+    var rows = data.announcements || [];
+    document.getElementById('pageContent').innerHTML = '<div class="page-intro"><div><h2>Thông báo lớp</h2><p>Thông báo đang hiệu lực dành cho em.</p></div><span class="date-small">Tổng: ' + rows.length + ' tin</span></div>' + (rows.length ? rows.map(function (row) { return '<article class="student-assignment-card"><div class="student-assignment-main"><h3>' + esc(row.TieuDe) + '</h3><div class="student-assignment-meta"><span>Đăng ngày ' + dateLabel(row.NgayDang) + '</span><span>' + (row.NgayHetHan ? 'Đến ' + dateLabel(row.NgayHetHan) : 'Không thời hạn') + '</span></div><p>' + esc(row.NoiDung) + '</p></div></article>'; }).join('') : '<section class="panel">' + emptyTable('Chưa có thông báo', 'Thông báo dành cho em sẽ xuất hiện tại đây.') + '</section>');
+  }
+  function openOwnSubmissionForm(assignment) {
+    var body = '<form id="activeForm" data-form="own-submission"><input type="hidden" name="MaBai" value="' + esc(assignment.MaBai) + '"><div class="helper-note">Bài tập: <strong>' + esc(assignment.TieuDe) + '</strong>. Dán liên kết bài làm Google Drive hoặc liên kết https:// đã được giáo viên hướng dẫn.</div>' + field('Liên kết bài làm', 'LinkBaiNop', assignment.LinkBaiNop, 'url', true, 'Liên kết bắt đầu bằng https://', true) + '</form>';
+    openModal(assignment.LinkBaiNop ? 'Cập nhật bài nộp' : 'Nộp bài tập', 'Giáo viên sẽ xem được liên kết này.', body, 'Gửi bài', false);
+  }
+
   function metric(label, value, foot, iconName, color) {
     var iconMap = { users: '♙', book: '▤', bell: '♧', calendar: '▦' };
     return '<article class="metric-card"><div class="metric-top"><span class="metric-label">' + esc(label) + '</span><span class="metric-icon ' + color + '">' + iconMap[iconName] + '</span></div><div class="metric-value">' + esc(value) + '</div><div class="metric-foot">' + esc(foot) + '</div></article>';
@@ -152,9 +266,9 @@
   function renderStudents() {
     var rows = state.students || [];
     document.getElementById('pageContent').innerHTML =
-      '<div class="page-intro"><div><h2>Danh sách học sinh</h2><p>Thêm, tìm kiếm và cập nhật tình trạng học sinh trong lớp.</p></div><button class="button button-primary" data-action="add-student">＋ Thêm học sinh</button></div>' +
+      '<div class="page-intro"><div><h2>Danh sách học sinh</h2><p>Tài khoản đăng nhập dùng mã học sinh; mật khẩu tạm chỉ hiện khi cấp hoặc đặt lại.</p></div><button class="button button-primary" data-action="add-student">＋ Thêm học sinh</button></div>' +
       '<div class="toolbar"><div class="search-box"><input id="studentSearch" type="search" placeholder="Tìm theo tên, mã hoặc lớp…" aria-label="Tìm học sinh"></div><select id="studentStatusFilter" class="filter-select"><option value="">Tất cả trạng thái</option>' + optionList(lookup('STUDENT_STATUS').map(function (x) { return x.label; }), '', false) + '</select><div class="toolbar-spacer"></div><span class="date-small">Tổng: ' + rows.length + ' học sinh</span></div>' +
-      '<section class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Học sinh</th><th>Lớp</th><th>Trạng thái</th><th>Ghi chú</th><th></th></tr></thead><tbody id="studentRows"></tbody></table></div></section>';
+      '<section class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Học sinh</th><th>Lớp</th><th>Trạng thái</th><th>Tài khoản</th><th>Ghi chú</th><th></th></tr></thead><tbody id="studentRows"></tbody></table></div></section>';
     renderStudentRows();
     document.getElementById('studentSearch').addEventListener('input', renderStudentRows);
     document.getElementById('studentStatusFilter').addEventListener('change', renderStudentRows);
@@ -168,8 +282,8 @@
     });
     var body = document.getElementById('studentRows');
     body.innerHTML = rows.length ? rows.map(function (row) {
-      return '<tr><td><div class="student-cell"><span class="student-initial">' + esc(initials(row.HoTen)) + '</span><div><span class="student-name">' + esc(row.HoTen) + '</span><span class="student-code">' + esc(row.MaHS) + '</span></div></div></td><td>' + esc(row.Lop || '—') + '</td><td>' + pill(row.TrangThai) + '</td><td>' + esc(row.GhiChu || '—') + '</td><td><div class="row-actions"><button class="icon-action" title="Sửa học sinh" aria-label="Sửa học sinh" data-action="edit-student" data-id="' + esc(row.MaHS) + '">' + icons.edit + '</button></div></td></tr>';
-    }).join('') : '<tr><td colspan="5">' + emptyTable('Không có học sinh phù hợp', 'Thử thay đổi từ khóa hoặc bộ lọc.') + '</td></tr>';
+      return '<tr><td><div class="student-cell"><span class="student-initial">' + esc(initials(row.HoTen)) + '</span><div><span class="student-name">' + esc(row.HoTen) + '</span><span class="student-code">' + esc(row.MaHS) + '</span></div></div></td><td>' + esc(row.Lop || '—') + '</td><td>' + pill(row.TrangThai) + '</td><td>' + pill(row.TaiKhoanTrangThai || 'Chưa cấp') + '</td><td>' + esc(row.GhiChu || '—') + '</td><td><div class="row-actions"><button class="icon-action" title="Sửa học sinh" aria-label="Sửa học sinh" data-action="edit-student" data-id="' + esc(row.MaHS) + '">' + icons.edit + '</button><button class="icon-action" title="Cấp hoặc đặt lại mật khẩu tạm" aria-label="Cấp hoặc đặt lại mật khẩu tạm" data-action="reset-student-password" data-id="' + esc(row.MaHS) + '">↻</button></div></td></tr>';
+    }).join('') : '<tr><td colspan="6">' + emptyTable('Không có học sinh phù hợp', 'Thử thay đổi từ khóa hoặc bộ lọc.') + '</td></tr>';
   }
 
   function renderAssignments() {
@@ -273,6 +387,13 @@
       (submitLabel ? '<button class="button button-primary" type="submit" form="activeForm">' + esc(submitLabel) + '</button>' : '') + '</div></section></div>';
   }
   function closeModal() { document.getElementById('modalRoot').innerHTML = ''; }
+  function openCredentialsModal(credentials, message) {
+    if (!credentials) return;
+    var body = '<div class="helper-note">' + esc(message || 'Hãy gửi riêng thông tin này cho đúng học sinh. Mật khẩu tạm sẽ không được lưu dạng chữ và chỉ hiện lần này.') + '</div>' +
+      '<div class="credential-box"><div class="credential-row"><span>Tên đăng nhập</span><strong>' + esc(credentials.username) + '</strong></div><div class="credential-row"><span>Mật khẩu tạm</span><strong>' + esc(credentials.password) + '</strong></div></div>' +
+      '<p class="credential-warning">Học sinh cần đổi mật khẩu ngay lần đăng nhập đầu tiên. Không gửi mật khẩu vào nhóm lớp chung.</p>';
+    openModal('Thông tin tài khoản học sinh', credentials.displayName || '', body, '', false);
+  }
   function field(label, name, value, type, required, hint, full) {
     var fieldClass = 'field' + (full ? ' field-full' : '');
     var input = type === 'textarea' ?
@@ -361,7 +482,8 @@
     var data = formObject(form);
     var method = action === 'student' ? 'saveStudent' :
       action === 'assignment' ? 'saveAssignment' :
-      action === 'announcement' ? 'saveAnnouncement' : '';
+      action === 'announcement' ? 'saveAnnouncement' :
+      action === 'own-submission' ? 'saveOwnSubmission' : '';
     if (action === 'attendance') {
       data.records = Array.prototype.slice.call(form.querySelectorAll('tbody tr[data-student-id]')).map(function (row) {
         return {
@@ -377,13 +499,46 @@
     if (submit) { submit.disabled = true; submit.textContent = 'Đang lưu…'; }
     callServer(method, [data]).then(function (result) {
       closeModal();
-      toast(result.message || 'Đã lưu dữ liệu.', 'success');
       navigate(state.view);
+      if (result.initialCredentials) openCredentialsModal(result.initialCredentials, result.message);
+      else toast(result.message || 'Đã lưu dữ liệu.', 'success');
     }).catch(function (error) {
       if (submit) { submit.disabled = false; submit.textContent = 'Thử lưu lại'; }
       toast(error.message || 'Không lưu được dữ liệu.', 'error');
     });
   }
+
+  document.getElementById('loginForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var button = document.getElementById('loginSubmit');
+    button.disabled = true;
+    button.textContent = 'Đang đăng nhập…';
+    document.getElementById('loginError').textContent = '';
+    callServer('login', [document.getElementById('loginUsername').value, document.getElementById('loginPassword').value]).then(acceptSession).catch(function (error) {
+      document.getElementById('loginError').textContent = error.message || 'Không đăng nhập được.';
+    }).finally(function () {
+      button.disabled = false;
+      button.textContent = 'Đăng nhập';
+    });
+  });
+
+  document.getElementById('passwordForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var current = document.getElementById('currentPassword').value;
+    var next = document.getElementById('newPassword').value;
+    var confirm = document.getElementById('confirmPassword').value;
+    var button = document.getElementById('passwordSubmit');
+    if (next !== confirm) { document.getElementById('passwordError').textContent = 'Hai mật khẩu mới chưa trùng khớp.'; return; }
+    button.disabled = true;
+    button.textContent = 'Đang lưu…';
+    document.getElementById('passwordError').textContent = '';
+    callServer('changePassword', [current, next]).then(acceptSession).catch(function (error) {
+      document.getElementById('passwordError').textContent = error.message || 'Không đổi được mật khẩu.';
+    }).finally(function () {
+      button.disabled = false;
+      button.textContent = 'Lưu mật khẩu mới';
+    });
+  });
 
   document.addEventListener('click', function (event) {
     var nav = event.target.closest('[data-view]');
@@ -403,6 +558,18 @@
     if (action === 'edit-student') { openStudentForm(state.students.find(function (x) { return x.MaHS === button.dataset.id; })); return; }
     if (action === 'edit-assignment') { openAssignmentForm(state.assignments.find(function (x) { return x.MaBai === button.dataset.id; })); return; }
     if (action === 'edit-announcement') { openAnnouncementForm(state.announcements.find(function (x) { return x.MaThongBao === button.dataset.id; })); return; }
+    if (action === 'reset-student-password') {
+      button.disabled = true;
+      callServer('resetStudentPassword', [button.dataset.id]).then(function (credentials) {
+        openCredentialsModal(credentials, credentials.message);
+      }).catch(function (error) { toast(error.message || 'Không đặt lại được mật khẩu.', 'error'); }).finally(function () { button.disabled = false; });
+      return;
+    }
+    if (action === 'submit-own-assignment') {
+      var assignment = state.studentPortal && state.studentPortal.assignments.find(function (row) { return row.MaBai === button.dataset.id; });
+      if (assignment) openOwnSubmissionForm(assignment);
+      return;
+    }
     if (action === 'new-attendance') {
       var statuses = state.attendance && state.attendance.statuses || [];
       openAttendanceEditor(null, null, statuses);
@@ -460,6 +627,9 @@ themeToggle.addEventListener('click', function () {
     isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'
   );
 });
+  document.getElementById('logoutButton').addEventListener('click', function () {
+    callServer('logout').catch(function () {}).finally(function () { showLogin('Bạn đã đăng xuất.'); });
+  });
   document.getElementById('menuToggle').addEventListener('click', function () {
     document.getElementById('sidebar').classList.add('open');
     document.getElementById('mobileScrim').classList.add('show');
@@ -468,6 +638,6 @@ themeToggle.addEventListener('click', function () {
   document.getElementById('mobileScrim').addEventListener('click', closeSidebar);
   document.querySelectorAll('[data-icon]').forEach(function (node) { node.innerHTML = icons[node.dataset.icon] || ''; });
 
-  loadBootstrap();
+  restoreSession();
 })();
 </script>
