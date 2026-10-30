@@ -384,8 +384,8 @@ function sessionResponse_(token, account) {
   };
 }
 
-function accountSheet_() {
-  const ss = spreadsheet_();
+function accountSheet_(spreadsheet) {
+  const ss = spreadsheet || spreadsheet_();
   let sheet = ss.getSheetByName(AUTH.sheetName);
   if (!sheet) sheet = ss.insertSheet(AUTH.sheetName);
   if (sheet.getMaxColumns() < AUTH.headers.length) {
@@ -402,8 +402,8 @@ function accountSheet_() {
   return sheet;
 }
 
-function readAccounts_() {
-  const sheet = accountSheet_();
+function readAccounts_(existingSheet) {
+  const sheet = existingSheet || accountSheet_();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
   return sheet.getRange(2, 1, lastRow - 1, AUTH.headers.length).getValues()
