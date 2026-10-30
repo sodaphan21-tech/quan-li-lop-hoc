@@ -154,6 +154,97 @@ function saveStudent(sessionToken, payload) {
   });
 }
 
+/** Import a validated roster as new students only; duplicate codes reject the whole batch. */
+function importStudents(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
+  payload = payload || {};
+  const input = Array.isArray(payload.students) ? payload.students : [];
+  if (!input.length) throw new Error('File chưa có dòng học sinh để nhập.');
+  if (input.length > 40) throw new Error('Mỗi lần chỉ nhập tối đa 40 học sinh.');
+
+  return withWriteLock_(function () {
+    const config = readConfig_();
+    const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
+    const statusOptions = labels_(config, LOOKUP_KEYS.student);
+    const existingRows = readRows_('HocSinh');
+    const accounts = readAccounts_();
+    const existingUsernames = {};
+    existingRows.forEach(function (row) {
+      const username = normalizeUsername_(row.MaHS);
+      if (username) existingUsernames[username] = true;
+    });
+    accounts.forEach(function (account) {
+      if (account.username) existingUsernames[account.username] = true;
+    });
+
+    const seen = {};
+    const prepared = [];
+    const errors = [];
+    input.forEach(function (source, index) {
+      const rowNumber = index + 2;
+      source = source || {};
+      try {
+        const studentId = cleanText_(source.MaHS, 40);
+        const name = cleanText_(source.HoTen, 120);
+        const className = cleanText_(source.Lop, 80);
+        const status = cleanText_(source.TrangThai, 60) || activeLabel;
+        const note = cleanText_(source.GhiChu, 1000);
+        if (!studentId) throw new Error('thiếu MaHS');
+        if (!name) throw new Error('thiếu HoTen');
+        if (!className) throw new Error('thiếu Lop');
+
+        const username = normalizeUsername_(studentId);
+        if (!username) throw new Error('MaHS phải có ít nhất 3 kí tự Latin, số, dấu chấm, gạch ngang hoặc gạch dưới');
+        if (username === 'giaovien') throw new Error('MaHS giaovien đã dành riêng cho giáo viên');
+        if (seen[username]) throw new Error('MaHS bị trùng trong file');
+        if (existingUsernames[username]) throw new Error('MaHS đã tồn tại trong ứng dụng');
+        if (statusOptions.length && statusOptions.indexOf(status) < 0) throw new Error('TrangThai không khớp danh mục trạng thái trong ứng dụng');
+
+        seen[username] = true;
+        prepared.push({
+          MaHS: studentId,
+          HoTen: name,
+          Lop: className,
+          TrangThai: status,
+          GhiChu: note
+        });
+      } catch (error) {
+        errors.push('Dòng ' + rowNumber + ': ' + error.message);
+      }
+    });
+    if (errors.length) {
+      const shown = errors.slice(0, 12);
+      if (errors.length > shown.length) shown.push('… và ' + (errors.length - shown.length) + ' lỗi khác');
+      throw new Error('Chưa nhập dòng nào. Hãy sửa file rồi thử lại: ' + shown.join(' | '));
+    }
+
+    const currentAccountCount = accounts.filter(function (account) { return account.role === 'HOCSINH'; }).length;
+    const accountsNeeded = prepared.filter(function (student) { return student.TrangThai === activeLabel; }).length;
+    if (currentAccountCount + accountsNeeded > 40) {
+      throw new Error('Danh sách này cần thêm ' + accountsNeeded + ' tài khoản đang học, nhưng ứng dụng chỉ hỗ trợ tối đa 40 tài khoản học sinh.');
+    }
+
+    const credentials = [];
+    prepared.forEach(function (student) {
+      const saved = upsertRow_('HocSinh', student);
+      const issued = createStudentAccount_(saved, config);
+      if (issued) {
+        credentials.push({
+          username: issued.username,
+          password: issued.password,
+          displayName: saved.HoTen
+        });
+      }
+    });
+    return {
+      added: prepared.length,
+      accountsCreated: credentials.length,
+      credentials: credentials,
+      message: 'Đã nhập ' + prepared.length + ' học sinh; tạo ' + credentials.length + ' tài khoản đang học.'
+    };
+  });
+}
+
 function getAssignments(sessionToken) {
   requireAuth_(sessionToken, 'GIAOVIEN', false);
   return readRows_('BaiTap').sort(function (a, b) {
