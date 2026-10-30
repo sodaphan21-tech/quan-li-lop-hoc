@@ -5,6 +5,7 @@
 - Tài khoản giáo viên dùng tên đăng nhập `giaovien`.
 - Tài khoản học sinh dùng mã học sinh trong cột `MaHS` làm tên đăng nhập.
 - Tối đa 40 tài khoản học sinh. Khi giáo viên thêm học sinh đang học, ứng dụng tự tạo tài khoản và hiển thị mật khẩu tạm đúng một lần.
+- Mã đăng nhập học sinh cần duy nhất, dùng chữ Latin/số và dấu `.`, `-`, `_`; `giaovien` được dành riêng cho giáo viên.
 - Mật khẩu được băm cùng muối ngẫu nhiên trong tab ẩn `TaiKhoan`; sheet không lưu mật khẩu dạng chữ.
 - Lần đăng nhập đầu tiên, giáo viên và học sinh phải đổi mật khẩu tạm.
 - Giáo viên có thể cấp lại mật khẩu tạm bằng nút `↻` ở danh sách học sinh.
@@ -25,4 +26,6 @@ Không chạy lại `initializeLoginSystem_` khi đã có tài khoản. Nếu gi
 
 Sau khi đẩy mã lên Apps Script, cập nhật phiên bản web app tại **Triển khai → Quản lý các bản triển khai → Sửa → Phiên bản mới → Triển khai**.
 
-Học sinh không được chia sẻ quyền mở bảng tính. Tab ẩn chỉ giúp gọn giao diện, không phải cơ chế bảo mật; quyền dữ liệu được kiểm tra ở các hàm phía máy chủ. Chỉ cho học sinh truy cập web app sau khi đã cập nhật mã đăng nhập và kiểm tra quyền của hai vai trò.
+Web app cần chạy **với tư cách chủ sở hữu/giáo viên** để học sinh không cần quyền mở bảng tính. Vì học sinh đăng nhập bằng tài khoản riêng của ứng dụng, quyền truy cập web app phải cho phép các em mở trang đăng nhập (thường là **Bất kỳ ai** nếu các em không dùng tài khoản Google trong cùng tổ chức). Các hàm phía máy chủ vẫn xác minh phiên và vai trò trước khi đọc/ghi dữ liệu.
+
+Không chia sẻ quyền mở bảng tính cho học sinh. Tab ẩn chỉ giúp gọn giao diện, không phải cơ chế bảo mật. Chỉ gửi mật khẩu tạm cho đúng học sinh qua kênh riêng; yêu cầu các em đổi mật khẩu ngay lần đầu.
