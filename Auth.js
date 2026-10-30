@@ -16,6 +16,25 @@ const AUTH = Object.freeze({
   lockSeconds: 600
 });
 
+/** Owner-only editor entry points; web callers cannot pass the active-user check. */
+function initializeLoginSystem() {
+  requireManualOwnerRun_();
+  return initializeLoginSystem_();
+}
+
+function resetTeacherPassword() {
+  requireManualOwnerRun_();
+  return resetTeacherPassword_();
+}
+
+function requireManualOwnerRun_() {
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  if (!activeEmail || !effectiveEmail || activeEmail !== effectiveEmail) {
+    throw new Error('Hàm này chỉ được chạy thủ công bởi chủ sở hữu trong trình chỉnh sửa Apps Script.');
+  }
+}
+
 /** Public RPC: login with a student code or the teacher username. */
 function login(username, password) {
   const normalized = normalizeUsername_(username);
