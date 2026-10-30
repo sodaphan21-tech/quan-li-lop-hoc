@@ -11,6 +11,16 @@
 - Giáo viên có thể cấp lại mật khẩu tạm bằng nút `↻` ở danh sách học sinh.
 - Học sinh chỉ nhận dữ liệu của chính mình: bài tập, bài nộp, điểm danh và thông báo phù hợp.
 
+## Nhập danh sách học sinh bằng Excel
+
+1. Trong mục **Học sinh**, bấm **Thêm học sinh → Nhập từ file Excel**.
+2. Tải mẫu `.xlsx`, điền dữ liệu trong sheet `HocSinh`, giữ hàng tiêu đề đầu tiên gồm `MaHS`, `HoTen`, `Lop`, `TrangThai`, `GhiChu`.
+3. `MaHS`, `HoTen`, `Lop` là bắt buộc. `TrangThai` có thể để trống (mặc định `Đang học`); nếu nhập thì phải khớp trạng thái đang dùng trong app.
+4. Chọn file, xem trước rồi xác nhận. Lượt nhập chỉ thêm mới; nếu có mã trùng hoặc dòng sai, toàn bộ lượt bị từ chối để giáo viên sửa file. Tối đa 40 dòng mỗi lượt và tối đa 40 tài khoản học sinh.
+5. Mật khẩu tạm của học sinh đang học hiện một lần sau khi nhập. Hãy lưu riêng và gửi đúng từng em.
+
+Workbook được đọc trong trình duyệt; ứng dụng chỉ gửi các dòng đã đọc sang máy chủ Apps Script. Tính năng đọc Excel cần kết nối mạng để tải thư viện SheetJS từ CDN chính thức.
+
 ## Cài lần đầu
 
 1. Chép các tệp trong gói mã này vào thư mục Apps Script đã `clasp clone`, giữ nguyên tệp `.clasp.json` của riêng dự án.
