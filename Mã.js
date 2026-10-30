@@ -1,6 +1,7 @@
 /**
  * QUẢN LÍ LỚP HỌC — Google Apps Script backend
- * Dữ liệu được lưu trong 7 sheet hiện có. Không xóa hàng khi lưu.
+ * Dữ liệu lớp ở 7 sheet nghiệp vụ; TaiKhoan là tab ẩn lưu thông tin xác thực.
+ * Mật khẩu không lưu dạng chữ. Không chia sẻ bảng tính cho học sinh.
  */
 const APP = Object.freeze({
   spreadsheetId: '1-T3gujsWM_hmZ-tUwXVgxxop0OFQCUhHgp_ztdtPwPI',
@@ -58,12 +59,13 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-function include(filename) {
+function include_(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
 /** Trả cấu hình nhẹ và số liệu cho trang Tổng quan. */
-function getBootstrap() {
+function getBootstrap(sessionToken) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   const config = readConfig_();
   const students = readRows_('HocSinh');
   const assignments = readRows_('BaiTap');
@@ -106,13 +108,21 @@ function getBootstrap() {
   };
 }
 
-function getStudents() {
-  return readRows_('HocSinh').sort(function (a, b) {
+function getStudents(sessionToken) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
+  const accountByUser = {};
+  readAccounts_().forEach(function (account) { accountByUser[account.username] = account; });
+  return readRows_('HocSinh').map(function (student) {
+    const account = accountByUser[String(student.MaHS || '').toLowerCase()];
+    student.TaiKhoanTrangThai = account ? (account.status === 'ACTIVE' ? 'Đã cấp' : 'Tạm khóa') : 'Chưa cấp';
+    return student;
+  }).sort(function (a, b) {
     return String(a.HoTen || '').localeCompare(String(b.HoTen || ''), 'vi');
   });
 }
 
-function saveStudent(payload) {
+function saveStudent(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   payload = payload || {};
   const config = readConfig_();
   const id = cleanText_(payload.MaHS, 40);
@@ -133,18 +143,26 @@ function saveStudent(payload) {
   };
 
   return withWriteLock_(function () {
+    assertStudentAccountCapacity_(record.MaHS);
     const saved = upsertRow_('HocSinh', record);
-    return { message: id ? 'Đã cập nhật học sinh.' : 'Đã thêm học sinh.', data: saved };
+    const initialCredentials = createStudentAccount_(saved, config);
+    return {
+      message: id ? 'Đã cập nhật học sinh.' : 'Đã thêm học sinh.',
+      data: saved,
+      initialCredentials: initialCredentials
+    };
   });
 }
 
-function getAssignments() {
+function getAssignments(sessionToken) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   return readRows_('BaiTap').sort(function (a, b) {
     return String(b.NgayGiao || '').localeCompare(String(a.NgayGiao || ''));
   });
 }
 
-function saveAssignment(payload) {
+function saveAssignment(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   payload = payload || {};
   const config = readConfig_();
   const id = cleanText_(payload.MaBai, 40);
@@ -202,14 +220,15 @@ function saveAssignment(payload) {
   });
 }
 
-function getSubmissions(assignmentId) {
+function getSubmissions(sessionToken, assignmentId) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   const assignment = findById_('BaiTap', 'MaBai', cleanText_(assignmentId, 40));
   if (!assignment) throw new Error('Không tìm thấy bài tập đã chọn.');
 
   const config = readConfig_();
   const selectedLabel = label_(config, LOOKUP_KEYS.recipient, 'SELECTED_STUDENTS', 'Nhóm học sinh');
   const allowedIds = assignment.DoiTuongNhan === selectedLabel ? normalizeIds_(assignment.DanhSachMaHS) : null;
-  const students = getStudents().filter(function (student) {
+  const students = readRows_('HocSinh').filter(function (student) {
     const active = student.TrangThai === label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
     return active && (!allowedIds || allowedIds.indexOf(student.MaHS) >= 0);
   });
@@ -236,7 +255,8 @@ function getSubmissions(assignmentId) {
   };
 }
 
-function saveSubmission(payload) {
+function saveSubmission(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   payload = payload || {};
   const assignmentId = cleanText_(payload.MaBai, 40);
   const studentId = cleanText_(payload.MaHS, 40);
@@ -279,26 +299,28 @@ function saveSubmission(payload) {
   });
 }
 
-function getAttendanceData() {
+function getAttendanceData(sessionToken) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   const config = readConfig_();
   const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
   return {
     sessions: readRows_('BuoiDiemDanh').sort(function (a, b) {
       return String(b.Ngay || '').localeCompare(String(a.Ngay || ''));
     }).slice(0, 100),
-    students: getStudents().filter(function (row) { return row.TrangThai === activeLabel; }),
+    students: readRows_('HocSinh').filter(function (row) { return row.TrangThai === activeLabel; }),
     statuses: labels_(config, LOOKUP_KEYS.attendance)
   };
 }
 
-function getAttendanceSession(sessionId) {
+function getAttendanceSession(sessionToken, sessionId) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   const session = findById_('BuoiDiemDanh', 'MaBuoi', cleanText_(sessionId, 40));
   if (!session) throw new Error('Không tìm thấy buổi điểm danh.');
   const details = readRows_('ChiTietDiemDanh').filter(function (row) { return row.MaBuoi === session.MaBuoi; });
   const byStudent = {};
   details.forEach(function (row) { byStudent[row.MaHS] = row; });
 
-  const students = getStudents();
+  const students = readRows_('HocSinh');
   const config = readConfig_();
   const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
   const rows = students.filter(function (student) {
@@ -315,7 +337,8 @@ function getAttendanceSession(sessionId) {
   return { session: session, rows: rows, statuses: labels_(config, LOOKUP_KEYS.attendance) };
 }
 
-function saveAttendanceSession(payload) {
+function saveAttendanceSession(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   payload = payload || {};
   const config = readConfig_();
   const id = cleanText_(payload.MaBuoi, 40);
@@ -326,7 +349,7 @@ function saveAttendanceSession(payload) {
 
   const allowedStatuses = labels_(config, LOOKUP_KEYS.attendance);
   const knownIds = {};
-  getStudents().forEach(function (row) { knownIds[row.MaHS] = true; });
+  readRows_('HocSinh').forEach(function (row) { knownIds[row.MaHS] = true; });
 
   const cleanedRecords = records.map(function (row) {
     const studentId = cleanText_(row.MaHS, 40);
@@ -354,13 +377,15 @@ function saveAttendanceSession(payload) {
   });
 }
 
-function getAnnouncements() {
+function getAnnouncements(sessionToken) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   return readRows_('ThongBao').sort(function (a, b) {
     return String(b.NgayDang || '').localeCompare(String(a.NgayDang || ''));
   });
 }
 
-function saveAnnouncement(payload) {
+function saveAnnouncement(sessionToken, payload) {
+  requireAuth_(sessionToken, 'GIAOVIEN', false);
   payload = payload || {};
   const config = readConfig_();
   const id = cleanText_(payload.MaThongBao, 40);
