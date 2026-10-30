@@ -15,12 +15,12 @@
 
 1. Chép các tệp trong gói mã này vào thư mục Apps Script đã `clasp clone`, giữ nguyên tệp `.clasp.json` của riêng dự án.
 2. Mở PowerShell ở thư mục dự án và chạy `clasp.cmd push`.
-3. Trong Apps Script, chọn hàm `initializeLoginSystem_` và chạy một lần. Cấp quyền nếu Google hỏi.
+3. Trong Apps Script, chọn hàm `initializeLoginSystem` (không có dấu gạch dưới cuối tên) và chạy một lần. Cấp quyền nếu Google hỏi.
 4. Mở Nhật ký thực thi. Mật khẩu tạm giáo viên và mật khẩu tạm của các học sinh đang có trong sheet `HocSinh` được in ra tại đó. Lưu riêng và gửi từng mật khẩu cho đúng người.
 5. Đăng nhập bằng `giaovien`; sau đó đổi mật khẩu tạm.
 6. Nếu sheet `HocSinh` đang trống, tài khoản giáo viên vẫn được tạo. Khi giáo viên thêm từng học sinh, ứng dụng cấp tài khoản học sinh tự động.
 
-Không chạy lại `initializeLoginSystem_` khi đã có tài khoản. Nếu giáo viên quên mật khẩu, chạy riêng hàm `resetTeacherPassword_` trong trình soạn thảo Apps Script; mật khẩu tạm mới sẽ hiện trong Nhật ký thực thi.
+Không chạy lại `initializeLoginSystem` khi đã có tài khoản. Nếu giáo viên quên mật khẩu, chạy hàm `resetTeacherPassword` trong trình soạn thảo Apps Script; mật khẩu tạm mới sẽ hiện trong Nhật ký thực thi. Hai hàm này kiểm tra tài khoản đang chạy là chủ sở hữu và chỉ cho phép thao tác thủ công trong trình chỉnh sửa.
 
 ## Triển khai
 
