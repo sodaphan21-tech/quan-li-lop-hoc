@@ -5,10 +5,42 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f7fb">
-  <?!= include('Styles'); ?>
+  <?!= include_('Styles'); ?>
 </head>
 <body>
-  <div class="app-shell">
+  <section class="auth-screen" id="loginScreen">
+    <div class="auth-card">
+      <div class="brand-mark auth-brand" aria-hidden="true"><span>QL</span></div>
+      <p class="auth-eyebrow">QUẢN LÍ LỚP HỌC</p>
+      <h1>Đăng nhập</h1>
+      <p class="auth-description">Đăng nhập bằng tài khoản giáo viên hoặc mã học sinh được cấp.</p>
+      <form id="loginForm" autocomplete="on">
+        <div class="field"><label for="loginUsername">Tên đăng nhập</label><input id="loginUsername" name="username" type="text" autocomplete="username" required maxlength="60" placeholder="Ví dụ: giaovien hoặc mã học sinh"></div>
+        <div class="field"><label for="loginPassword">Mật khẩu</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="Nhập mật khẩu"></div>
+        <p class="auth-error" id="loginError" role="alert"></p>
+        <button class="button button-primary auth-submit" id="loginSubmit" type="submit">Đăng nhập</button>
+      </form>
+      <small class="auth-footnote">Tài khoản học sinh do giáo viên cấp. Không chia sẻ mật khẩu.</small>
+    </div>
+  </section>
+
+  <section class="auth-screen hidden" id="passwordScreen">
+    <div class="auth-card">
+      <div class="brand-mark auth-brand" aria-hidden="true"><span>QL</span></div>
+      <p class="auth-eyebrow">BẢO MẬT TÀI KHOẢN</p>
+      <h1>Đổi mật khẩu tạm</h1>
+      <p class="auth-description">Hãy đặt mật khẩu riêng trước khi sử dụng ứng dụng.</p>
+      <form id="passwordForm" autocomplete="off">
+        <div class="field"><label for="currentPassword">Mật khẩu hiện tại</label><input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required maxlength="128"></div>
+        <div class="field"><label for="newPassword">Mật khẩu mới</label><input id="newPassword" name="newPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><small>Tối thiểu 10 ký tự.</small></div>
+        <div class="field"><label for="confirmPassword">Nhập lại mật khẩu mới</label><input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="128"></div>
+        <p class="auth-error" id="passwordError" role="alert"></p>
+        <button class="button button-primary auth-submit" id="passwordSubmit" type="submit">Lưu mật khẩu mới</button>
+      </form>
+    </div>
+  </section>
+
+  <div class="app-shell hidden" id="appShell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true"><span>QL</span></div>
@@ -18,23 +50,27 @@
 
       <div class="class-switcher">
         <div class="class-avatar" id="classAvatar">L</div>
-        <div class="class-copy"><span>Lớp đang quản lí</span><strong id="className">Đang tải…</strong></div>
+        <div class="class-copy"><span id="classLabel">Lớp đang quản lí</span><strong id="className">Đang tải…</strong></div>
         <span class="switcher-dot"></span>
       </div>
 
-      <div class="nav-label">KHÔNG GIAN LÀM VIỆC</div>
+      <div class="nav-label" id="navLabel">KHÔNG GIAN LÀM VIỆC</div>
       <nav class="main-nav" aria-label="Điều hướng chính">
-        <button class="nav-item active" data-view="dashboard" type="button"><span class="nav-icon" data-icon="home"></span><span>Tổng quan</span></button>
-        <button class="nav-item" data-view="students" type="button"><span class="nav-icon" data-icon="users"></span><span>Học sinh</span></button>
-        <button class="nav-item" data-view="assignments" type="button"><span class="nav-icon" data-icon="book"></span><span>Bài tập</span></button>
-        <button class="nav-item" data-view="submissions" type="button"><span class="nav-icon" data-icon="check"></span><span>Bài nộp</span></button>
-        <button class="nav-item" data-view="attendance" type="button"><span class="nav-icon" data-icon="calendar"></span><span>Điểm danh</span></button>
-        <button class="nav-item" data-view="announcements" type="button"><span class="nav-icon" data-icon="bell"></span><span>Thông báo</span></button>
+        <button class="nav-item active" data-role-nav="GIAOVIEN" data-view="dashboard" type="button"><span class="nav-icon" data-icon="home"></span><span>Tổng quan</span></button>
+        <button class="nav-item" data-role-nav="GIAOVIEN" data-view="students" type="button"><span class="nav-icon" data-icon="users"></span><span>Học sinh</span></button>
+        <button class="nav-item" data-role-nav="GIAOVIEN" data-view="assignments" type="button"><span class="nav-icon" data-icon="book"></span><span>Bài tập</span></button>
+        <button class="nav-item" data-role-nav="GIAOVIEN" data-view="submissions" type="button"><span class="nav-icon" data-icon="check"></span><span>Bài nộp</span></button>
+        <button class="nav-item" data-role-nav="GIAOVIEN" data-view="attendance" type="button"><span class="nav-icon" data-icon="calendar"></span><span>Điểm danh</span></button>
+        <button class="nav-item" data-role-nav="GIAOVIEN" data-view="announcements" type="button"><span class="nav-icon" data-icon="bell"></span><span>Thông báo</span></button>
+        <button class="nav-item hidden" data-role-nav="HOCSINH" data-view="student-home" type="button"><span class="nav-icon" data-icon="home"></span><span>Trang của em</span></button>
+        <button class="nav-item hidden" data-role-nav="HOCSINH" data-view="student-assignments" type="button"><span class="nav-icon" data-icon="book"></span><span>Bài tập của em</span></button>
+        <button class="nav-item hidden" data-role-nav="HOCSINH" data-view="student-attendance" type="button"><span class="nav-icon" data-icon="calendar"></span><span>Điểm danh</span></button>
+        <button class="nav-item hidden" data-role-nav="HOCSINH" data-view="student-announcements" type="button"><span class="nav-icon" data-icon="bell"></span><span>Thông báo lớp</span></button>
       </nav>
 
       <div class="sidebar-bottom">
-        <div class="privacy-note"><span class="privacy-dot"></span><div><strong>Không gian riêng tư</strong><small>Dữ liệu lưu trong Google Sheets</small></div></div>
-        <div class="user-card"><div class="user-avatar">GV</div><div><strong id="teacherName">Giáo viên</strong><small>Quản trị lớp học</small></div></div>
+        <div class="privacy-note"><span class="privacy-dot"></span><div><strong id="privacyTitle">Đăng nhập bảo mật</strong><small id="privacyText">Dữ liệu được phân quyền theo tài khoản</small></div></div>
+        <div class="user-card"><div class="user-avatar" id="userAvatar">GV</div><div><strong id="userName">Tài khoản</strong><small id="userRole">Đã đăng nhập</small></div></div>
       </div>
     </aside>
 
@@ -48,7 +84,7 @@
         title="Chuyển sang giao diện tối">
   <span class="refresh-icon" id="themeIcon">☾</span>
   <span id="themeLabel">Giao diện tối</span>
-</button> </div>
+</button><button class="button button-quiet" id="logoutButton" type="button">Đăng xuất</button> </div>
       </header>
       <section id="pageContent" class="page-content" aria-live="polite"></section>
       <footer class="app-footer"><span>Quản lí lớp học</span><span>Dữ liệu được lưu trực tiếp trong bảng tính của bạn</span></footer>
@@ -56,6 +92,6 @@
   </div>
   <div id="modalRoot"></div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
-  <?!= include('Scripts'); ?>
+  <?!= include_('Scripts'); ?>
 </body>
 </html>
