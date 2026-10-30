@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var state = { view: 'dashboard', bootstrap: null, students: [], assignments: [], announcements: [], attendance: null, submissions: null, auth: null, studentPortal: null };
+  var state = { view: 'dashboard', bootstrap: null, students: [], assignments: [], announcements: [], attendance: null, submissions: null, auth: null, studentPortal: null, pendingStudentImport: null, xlsxPromise: null };
   var titles = { dashboard: 'Tổng quan', students: 'Học sinh', assignments: 'Bài tập', submissions: 'Bài nộp', attendance: 'Điểm danh', announcements: 'Thông báo', 'student-home': 'Trang của em', 'student-assignments': 'Bài tập của em', 'student-attendance': 'Điểm danh', 'student-announcements': 'Thông báo lớp' };
   var icons = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-6h-4v6H4a1 1 0 0 1-1-1z"/></svg>',
@@ -38,6 +38,7 @@
   function showLogin(message) {
     state.auth = null;
     state.studentPortal = null;
+    state.pendingStudentImport = null;
     sessionStorage.removeItem('qlh_session');
     document.getElementById('appShell').classList.add('hidden');
     document.getElementById('passwordScreen').classList.add('hidden');
@@ -418,6 +419,139 @@
       '</div>');
     openModal(row.MaHS ? 'Cập nhật học sinh' : 'Thêm học sinh', 'Thông tin được lưu trong sheet HocSinh.', body, row.MaHS ? 'Lưu thay đổi' : 'Thêm học sinh', false);
   }
+  function openStudentAddOptions() {
+    var body = '<div class="import-choice-grid">' +
+      '<button class="import-choice-card" type="button" data-action="choose-manual-student"><span class="import-choice-icon">＋</span><strong>Thêm thủ công</strong><small>Nhập từng học sinh bằng biểu mẫu hiện tại.</small></button>' +
+      '<button class="import-choice-card" type="button" data-action="choose-file-students"><span class="import-choice-icon">⇧</span><strong>Nhập từ file Excel</strong><small>Tải mẫu, điền danh sách rồi nhập tối đa 40 học sinh một lần.</small></button>' +
+      '</div>';
+    openModal('Thêm học sinh', 'Chọn cách nhập danh sách vào sheet HocSinh.', body, '', false);
+  }
+  function openStudentImportForm() {
+    var body = '<div class="helper-note">Tải mẫu Excel rồi điền các cột <strong>MaHS, HoTen, Lop</strong>. MaHS phải dài ít nhất 3 kí tự và chỉ dùng chữ Latin, số, dấu chấm, gạch ngang hoặc gạch dưới. Có thể để trống TrangThai (mặc định là Đang học) và GhiChu. Mỗi học sinh một dòng; chỉ thêm học sinh mới, không ghi đè người đã có.</div>' +
+      '<div class="template-actions"><button class="button button-quiet button-small" type="button" data-action="download-student-template">⇩ Tải mẫu Excel</button><span class="field-hint">Nhập file .xlsx hoặc .xls, tối đa 5 MB.</span></div>' +
+      '<form id="activeForm" data-form="student-import"><div class="field"><label for="studentImportFile">Chọn file danh sách</label><input id="studentImportFile" name="studentImportFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" required><small>Ứng dụng đọc sheet đầu tiên; hàng đầu tiên phải là tên cột theo mẫu.</small></div></form>' +
+      '<p class="import-security-note">Nếu có mã học sinh trùng hoặc dòng sai định dạng, ứng dụng sẽ từ chối toàn bộ file và không ghi dòng nào.</p>';
+    openModal('Nhập danh sách từ Excel', 'Xem trước dữ liệu trước khi lưu vào bảng tính.', body, 'Đọc và xem trước', false);
+  }
+  function ensureXlsxLibrary() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (state.xlsxPromise) return state.xlsxPromise;
+    state.xlsxPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      script.onload = function () {
+        if (window.XLSX) resolve(window.XLSX);
+        else { state.xlsxPromise = null; reject(new Error('Không tải được thư viện đọc Excel.')); }
+      };
+      script.onerror = function () { state.xlsxPromise = null; reject(new Error('Không tải được thư viện đọc Excel. Hãy kiểm tra kết nối mạng rồi thử lại.')); };
+      document.head.appendChild(script);
+    });
+    return state.xlsxPromise;
+  }
+  function downloadStudentTemplate() {
+    ensureXlsxLibrary().then(function (XLSX) {
+      var workbook = XLSX.utils.book_new();
+      var sheet = XLSX.utils.aoa_to_sheet([['MaHS', 'HoTen', 'Lop', 'TrangThai', 'GhiChu']]);
+      sheet['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 34 }];
+      XLSX.utils.book_append_sheet(workbook, sheet, 'HocSinh');
+      XLSX.writeFile(workbook, 'Mau_nhap_hoc_sinh.xlsx');
+      toast('Đã tải mẫu Excel.', 'success');
+    }).catch(function (error) { toast(error.message, 'error'); });
+  }
+  function normalizeImportHeader(value) {
+    return normalize(value).replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  function mapStudentWorksheet(matrix) {
+    if (!matrix || !matrix.length) throw new Error('File Excel đang trống.');
+    var aliases = {
+      mahs: 'MaHS', 'ma hs': 'MaHS', 'ma hoc sinh': 'MaHS',
+      hoten: 'HoTen', 'ho va ten': 'HoTen', 'ten hoc sinh': 'HoTen',
+      lop: 'Lop', 'ten lop': 'Lop',
+      trangthai: 'TrangThai', 'trang thai': 'TrangThai',
+      ghichu: 'GhiChu', 'ghi chu': 'GhiChu'
+    };
+    var columnIndex = {};
+    (matrix[0] || []).forEach(function (cell, index) {
+      var fieldName = aliases[normalizeImportHeader(cell)];
+      if (fieldName && columnIndex[fieldName] === undefined) columnIndex[fieldName] = index;
+    });
+    var required = ['MaHS', 'HoTen', 'Lop'];
+    var missing = required.filter(function (name) { return columnIndex[name] === undefined; });
+    if (missing.length) throw new Error('Thiếu cột bắt buộc: ' + missing.join(', ') + '. Tải mẫu Excel để xem đúng định dạng.');
+    var records = [];
+    matrix.slice(1).forEach(function (row) {
+      row = row || [];
+      var record = {};
+      ['MaHS', 'HoTen', 'Lop', 'TrangThai', 'GhiChu'].forEach(function (name) {
+        var index = columnIndex[name];
+        var value = index === undefined || row[index] == null ? '' : String(row[index]).trim();
+        record[name] = value;
+      });
+      if (record.MaHS || record.HoTen || record.Lop || record.TrangThai || record.GhiChu) records.push(record);
+    });
+    if (!records.length) throw new Error('File chưa có dòng học sinh.');
+    if (records.length > 40) throw new Error('File có ' + records.length + ' dòng; mỗi lần chỉ nhập tối đa 40 học sinh.');
+    return records;
+  }
+  function readStudentExcel(file) {
+    if (!file) return Promise.reject(new Error('Bạn chưa chọn file Excel.'));
+    if (file.size > 5 * 1024 * 1024) return Promise.reject(new Error('File vượt quá 5 MB. Hãy giảm dung lượng rồi thử lại.'));
+    return ensureXlsxLibrary().then(function (XLSX) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onerror = function () { reject(new Error('Không đọc được file đã chọn.')); };
+        reader.onload = function (event) {
+          try {
+            var workbook = XLSX.read(event.target.result, { type: 'array', cellDates: false });
+            var firstSheet = workbook.SheetNames && workbook.SheetNames[0];
+            if (!firstSheet) throw new Error('Workbook không có sheet nào.');
+            var matrix = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1, defval: '', raw: false });
+            resolve(mapStudentWorksheet(matrix));
+          } catch (error) { reject(new Error(error.message || 'Định dạng file Excel không hợp lệ.')); }
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    });
+  }
+  function previewStudentImport(form) {
+    var fileInput = form.querySelector('#studentImportFile');
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    var submit = document.querySelector('.modal-footer button[type="submit"]');
+    if (submit) { submit.disabled = true; submit.textContent = 'Đang đọc file…'; }
+    readStudentExcel(file).then(function (students) {
+      state.pendingStudentImport = students;
+      closeModal();
+      openStudentImportPreview(students, file.name);
+    }).catch(function (error) {
+      toast(error.message || 'Không đọc được file Excel.', 'error');
+      if (submit) { submit.disabled = false; submit.textContent = 'Đọc và xem trước'; }
+    });
+  }
+  function openStudentImportPreview(students, fileName) {
+    var preview = students;
+    var table = '<div class="table-scroll import-preview-scroll"><table class="import-preview-table"><thead><tr><th>MaHS</th><th>Họ và tên</th><th>Lớp</th><th>Trạng thái</th></tr></thead><tbody>' +
+      preview.map(function (row) { return '<tr><td>' + esc(row.MaHS) + '</td><td>' + esc(row.HoTen) + '</td><td>' + esc(row.Lop) + '</td><td>' + esc(row.TrangThai || 'Đang học') + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+    var body = '<div class="notice-strip"><strong>' + students.length + ' học sinh</strong> đọc được từ ' + esc(fileName) + '. Kiểm tra danh sách rồi xác nhận nhập.</div>' + table +
+      '<div class="helper-note import-preview-note">Mã học sinh bị trùng hoặc sai định dạng sẽ khiến toàn bộ lượt nhập bị từ chối. Học sinh có trạng thái “Đang học” sẽ được cấp tài khoản và mật khẩu tạm.</div>' +
+      '<div class="import-preview-actions"><button class="button button-quiet" type="button" data-action="reopen-student-import">← Chọn file khác</button><button class="button button-primary" type="button" data-action="confirm-student-import">Nhập ' + students.length + ' học sinh</button></div>';
+    openModal('Xem trước danh sách', 'Dữ liệu sẽ được thêm mới vào sheet HocSinh.', body, '', true);
+  }
+  function openBulkCredentialsModal(result) {
+    var credentials = result.credentials || [];
+    var lines = ['TenDangNhap\tHoTen\tMatKhauTam'].concat(credentials.map(function (item) {
+      return [item.username, item.displayName, item.password].join('\t');
+    }));
+    var body = '<div class="notice-strip"><strong>' + result.added + ' học sinh đã được thêm.</strong> Tạo ' + result.accountsCreated + ' tài khoản học sinh đang học.</div>';
+    if (credentials.length) {
+      body += '<p class="import-security-note">Mật khẩu tạm chỉ hiển thị lần này. Hãy sao chép, lưu riêng và gửi đúng từng học sinh; không gửi vào nhóm lớp.</p>' +
+        '<textarea id="importCredentialsText" class="credentials-textarea" readonly aria-label="Danh sách tài khoản và mật khẩu tạm">' + esc(lines.join('\n')) + '</textarea>' +
+        '<div class="import-preview-actions"><button class="button button-primary" type="button" data-action="copy-import-credentials">Sao chép danh sách tài khoản</button></div>';
+    } else {
+      body += '<p class="import-security-note">Các học sinh được nhập đều chưa ở trạng thái “Đang học”, nên hiện chưa tạo tài khoản.</p>';
+    }
+    openModal('Nhập học sinh thành công', 'Kết quả đã được ghi vào bảng tính.', body, '', true);
+  }
   function openAssignmentForm(record) {
     var row = record || {};
     var body = formShell('assignment', row.MaBai ? ['Bai', row.MaBai] : null,
@@ -479,6 +613,7 @@
   }
   function submitForm(form) {
     var action = form.dataset.form;
+    if (action === 'student-import') { previewStudentImport(form); return; }
     var data = formObject(form);
     var method = action === 'student' ? 'saveStudent' :
       action === 'assignment' ? 'saveAssignment' :
@@ -552,7 +687,40 @@
     if (action === 'close-modal') { closeModal(); return; }
     if (action === 'backdrop-close' && event.target === button) { closeModal(); return; }
     if (action === 'retry') { navigate(state.view); return; }
-    if (action === 'quick-student' || action === 'add-student') { openStudentForm(); return; }
+    if (action === 'quick-student') { openStudentAddOptions(); return; }
+    if (action === 'add-student') { openStudentAddOptions(); return; }
+    if (action === 'choose-manual-student') { closeModal(); openStudentForm(); return; }
+    if (action === 'choose-file-students') { closeModal(); openStudentImportForm(); return; }
+    if (action === 'download-student-template') { downloadStudentTemplate(); return; }
+    if (action === 'reopen-student-import') { closeModal(); openStudentImportForm(); return; }
+    if (action === 'confirm-student-import') {
+      if (!state.pendingStudentImport || !state.pendingStudentImport.length) { toast('Không còn danh sách để nhập. Hãy chọn lại file.', 'error'); return; }
+      button.disabled = true;
+      button.textContent = 'Đang nhập…';
+      callServer('importStudents', [{ students: state.pendingStudentImport }]).then(function (result) {
+        state.pendingStudentImport = null;
+        closeModal();
+        navigate('students');
+        if (result.credentials && result.credentials.length) openBulkCredentialsModal(result);
+        else toast(result.message || 'Đã nhập học sinh.', 'success');
+      }).catch(function (error) {
+        button.disabled = false;
+        button.textContent = 'Thử nhập lại';
+        toast(error.message || 'Không nhập được danh sách.', 'error');
+      });
+      return;
+    }
+    if (action === 'copy-import-credentials') {
+      var credentialsText = document.getElementById('importCredentialsText');
+      if (credentialsText) {
+        credentialsText.focus();
+        credentialsText.select();
+        var copied = false;
+        try { copied = document.execCommand('copy'); } catch (copyError) { copied = false; }
+        toast(copied ? 'Đã sao chép. Hãy lưu thông tin ở nơi riêng tư.' : 'Đã chọn nội dung. Nhấn Ctrl+C để sao chép.', copied ? 'success' : '');
+      }
+      return;
+    }
     if (action === 'add-assignment') { openAssignmentForm(); return; }
     if (action === 'add-announcement') { openAnnouncementForm(); return; }
     if (action === 'edit-student') { openStudentForm(state.students.find(function (x) { return x.MaHS === button.dataset.id; })); return; }
