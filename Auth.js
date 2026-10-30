@@ -61,7 +61,7 @@ function login(username, password) {
 
 /** Public RPC: validate the browser's session after a refresh. */
 function getSessionInfo(sessionToken) {
-  const account = requireAuth_(sessionToken, null, true);
+  const account = requireAuthContext_(sessionToken, null, true).account;
   return sessionResponse_(sessionToken, account);
 }
 
@@ -76,7 +76,8 @@ function changePassword(sessionToken, currentPassword, newPassword) {
   const current = currentPassword == null ? '' : String(currentPassword);
   const next = newPassword == null ? '' : String(newPassword);
   return withWriteLock_(function () {
-    const account = requireAuth_(sessionToken, null, true);
+    const context = requireAuthContext_(sessionToken, null, true);
+    const account = context.account;
     if (!passwordMatches_(current, account.salt, account.passwordHash)) {
       throw new Error('Mật khẩu hiện tại chưa đúng.');
     }
@@ -90,7 +91,7 @@ function changePassword(sessionToken, currentPassword, newPassword) {
     account.mustChangePassword = false;
     account.sessionVersion += 1;
     account.updatedAt = new Date();
-    writeAccount_(account);
+    writeAccount_(account, context.spreadsheet);
 
     CacheService.getScriptCache().remove(sessionCacheKey_(sessionToken));
     return createSessionResponse_(account);
@@ -100,18 +101,20 @@ function changePassword(sessionToken, currentPassword, newPassword) {
 /** Public RPC: create a new temporary password for one student. */
 function resetStudentPassword(sessionToken, studentId) {
   return withWriteLock_(function () {
-    requireAuth_(sessionToken, 'GIAOVIEN', false);
+    const context = requireAuthContext_(sessionToken, 'GIAOVIEN', false);
+    const ss = context.spreadsheet;
     const id = cleanText_(studentId, 60);
-    const student = findById_('HocSinh', 'MaHS', id);
+    const student = findById_('HocSinh', 'MaHS', id, ss);
     if (!student) throw new Error('Không tìm thấy học sinh cần đặt lại mật khẩu.');
-    const config = readConfig_();
+    const config = readConfig_(ss);
     if (student.TrangThai !== label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học')) {
       throw new Error('Chỉ có thể cấp mật khẩu cho học sinh đang học.');
     }
 
-    let account = findAccount_(normalizeUsername_(id));
+    const accounts = readAccounts_(null, ss);
+    let account = accounts.find(function (item) { return item.username === normalizeUsername_(id); }) || null;
     if (!account) {
-      const issued = createStudentAccount_(student, config);
+      const issued = createStudentAccount_(student, config, ss, accounts);
       if (!issued) throw new Error('Không thể tạo tài khoản cho học sinh này.');
       return {
         username: issued.username,
@@ -129,7 +132,7 @@ function resetStudentPassword(sessionToken, studentId) {
     account.status = 'ACTIVE';
     account.displayName = student.HoTen;
     account.updatedAt = new Date();
-    writeAccount_(account);
+    writeAccount_(account, ss);
 
     return {
       username: account.username,
@@ -142,11 +145,13 @@ function resetStudentPassword(sessionToken, studentId) {
 
 /** Public RPC: return only the signed-in student's own assignments, notices, and attendance. */
 function getStudentPortalData(sessionToken) {
-  const account = requireAuth_(sessionToken, 'HOCSINH', false);
-  const student = findById_('HocSinh', 'MaHS', account.studentId);
+  const context = requireAuthContext_(sessionToken, 'HOCSINH', false);
+  const account = context.account;
+  const ss = context.spreadsheet;
+  const student = findById_('HocSinh', 'MaHS', account.studentId, ss);
   if (!student) throw new Error('Không tìm thấy hồ sơ học sinh. Hãy liên hệ giáo viên.');
 
-  const config = readConfig_();
+  const config = readConfig_(ss);
   const activeStudentLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
   if (student.TrangThai !== activeStudentLabel) {
     throw new Error('Tài khoản học sinh hiện không hoạt động. Hãy liên hệ giáo viên.');
@@ -159,11 +164,11 @@ function getStudentPortalData(sessionToken) {
     return row.DoiTuongNhan !== selectedLabel || normalizeIds_(row.DanhSachMaHS).indexOf(student.MaHS) >= 0;
   };
 
-  const submissions = readRows_('BaiNop').filter(function (row) { return row.MaHS === student.MaHS; });
+  const submissions = readRows_('BaiNop', ss).filter(function (row) { return row.MaHS === student.MaHS; });
   const submissionByAssignment = {};
   submissions.forEach(function (row) { submissionByAssignment[row.MaBai] = row; });
 
-  const assignments = readRows_('BaiTap').filter(function (row) {
+  const assignments = readRows_('BaiTap', ss).filter(function (row) {
     return belongsToStudent(row);
   }).sort(function (a, b) {
     return String(a.HanNop || '9999-12-31').localeCompare(String(b.HanNop || '9999-12-31'));
@@ -188,15 +193,15 @@ function getStudentPortalData(sessionToken) {
   });
 
   const activeAnnouncementLabel = label_(config, LOOKUP_KEYS.announcement, 'ACTIVE', 'Đang hiệu lực');
-  const announcements = readRows_('ThongBao').filter(function (row) {
+  const announcements = readRows_('ThongBao', ss).filter(function (row) {
     return row.TrangThai === activeAnnouncementLabel && (!row.NgayHetHan || row.NgayHetHan >= today) && belongsToStudent(row);
   }).sort(function (a, b) {
     return String(b.NgayDang || '').localeCompare(String(a.NgayDang || ''));
   });
 
   const sessionsById = {};
-  readRows_('BuoiDiemDanh').forEach(function (row) { sessionsById[row.MaBuoi] = row; });
-  const attendance = readRows_('ChiTietDiemDanh').filter(function (row) {
+  readRows_('BuoiDiemDanh', ss).forEach(function (row) { sessionsById[row.MaBuoi] = row; });
+  const attendance = readRows_('ChiTietDiemDanh', ss).filter(function (row) {
     return row.MaHS === student.MaHS && sessionsById[row.MaBuoi];
   }).map(function (row) {
     const session = sessionsById[row.MaBuoi];
@@ -221,14 +226,16 @@ function getStudentPortalData(sessionToken) {
 
 /** Public RPC: submit or update only the authenticated student's own work. */
 function saveOwnSubmission(sessionToken, payload) {
-  const account = requireAuth_(sessionToken, 'HOCSINH', false);
+  const context = requireAuthContext_(sessionToken, 'HOCSINH', false);
+  const account = context.account;
   payload = payload || {};
+  const ss = context.spreadsheet;
   const assignmentId = cleanText_(payload.MaBai, 60);
-  const assignment = findById_('BaiTap', 'MaBai', assignmentId);
+  const assignment = findById_('BaiTap', 'MaBai', assignmentId, ss);
   if (!assignment) throw new Error('Không tìm thấy bài tập.');
 
-  const config = readConfig_();
-  const student = findById_('HocSinh', 'MaHS', account.studentId);
+  const config = readConfig_(ss);
+  const student = findById_('HocSinh', 'MaHS', account.studentId, ss);
   if (!student || student.TrangThai !== label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học')) {
     throw new Error('Tài khoản học sinh hiện không hoạt động.');
   }
@@ -246,7 +253,7 @@ function saveOwnSubmission(sessionToken, payload) {
   assertUrl_(link, 'Liên kết bài nộp');
 
   return withWriteLock_(function () {
-    const existing = readRows_('BaiNop').find(function (row) {
+    const existing = readRows_('BaiNop', ss).find(function (row) {
       return row.MaBai === assignmentId && row.MaHS === student.MaHS;
     });
     const late = assignment.HanNop && today_() > assignment.HanNop;
@@ -260,7 +267,7 @@ function saveOwnSubmission(sessionToken, payload) {
       LinkBaiNop: link,
       NhanXet: existing ? existing.NhanXet : ''
     };
-    upsertRow_('BaiNop', record);
+    upsertRow_('BaiNop', record, ss);
     return { message: late ? 'Đã lưu bài nộp trễ.' : 'Đã lưu bài nộp.' };
   });
 }
@@ -272,11 +279,12 @@ function saveOwnSubmission(sessionToken, payload) {
  */
 function initializeLoginSystem_() {
   const credentials = withWriteLock_(function () {
-    const existing = readAccounts_();
+    const ss = spreadsheet_();
+    const existing = readAccounts_(null, ss);
     if (existing.length) throw new Error('Đã có tài khoản trong sheet TaiKhoan; không khởi tạo lại để tránh ghi đè mật khẩu.');
 
-    const students = readRows_('HocSinh');
-    const config = readConfig_();
+    const students = readRows_('HocSinh', ss);
+    const config = readConfig_(ss);
     const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
     const activeStudents = students.filter(function (student) { return student.TrangThai === activeLabel; });
     if (activeStudents.length > AUTH.maxStudents) {
@@ -291,17 +299,18 @@ function initializeLoginSystem_() {
     });
 
     const list = [];
+    const accountRows = [];
     const teacherPassword = generateTemporaryPassword_();
-    insertAccount_({
+    accountRows.push(accountToRow_(buildAccount_({
       username: 'giaovien', role: 'GIAOVIEN', studentId: '',
       displayName: config.settings.TEN_GVCN || 'Giáo viên',
       password: teacherPassword, status: 'ACTIVE', mustChangePassword: true
-    });
+    })));
     list.push({ vaiTro: 'GIAOVIEN', tenDangNhap: 'giaovien', matKhauTam: teacherPassword });
 
     activeStudents.forEach(function (student) {
       const password = generateTemporaryPassword_();
-      insertAccount_({
+      accountRows.push(accountToRow_(buildAccount_({
         username: student.MaHS,
         role: 'HOCSINH',
         studentId: student.MaHS,
@@ -309,9 +318,13 @@ function initializeLoginSystem_() {
         password: password,
         status: 'ACTIVE',
         mustChangePassword: true
-      });
+      })));
       list.push({ vaiTro: 'HOCSINH', tenDangNhap: String(student.MaHS).toLowerCase(), matKhauTam: password, hoTen: student.HoTen });
     });
+
+    // Hashing remains per-account, but write all account rows in one Sheets call.
+    const sheet = accountSheet_(ss, true);
+    sheet.getRange(Math.max(2, sheet.getLastRow() + 1), 1, accountRows.length, AUTH.headers.length).setValues(accountRows);
     return list;
   });
 
@@ -322,7 +335,8 @@ function initializeLoginSystem_() {
 /** Private recovery: run manually from the Apps Script editor if the teacher loses access. */
 function resetTeacherPassword_() {
   const temporaryPassword = withWriteLock_(function () {
-    const account = findAccount_('giaovien');
+    const ss = spreadsheet_();
+    const account = findAccount_('giaovien', ss);
     if (!account) throw new Error('Chưa có tài khoản giáo viên. Hãy chạy initializeLoginSystem_ trước.');
     const password = generateTemporaryPassword_();
     account.salt = newSalt_();
@@ -330,7 +344,7 @@ function resetTeacherPassword_() {
     account.mustChangePassword = true;
     account.sessionVersion += 1;
     account.updatedAt = new Date();
-    writeAccount_(account);
+    writeAccount_(account, ss);
     return password;
   });
   Logger.log('Tên đăng nhập: giaovien\nMật khẩu tạm mới: ' + temporaryPassword);
@@ -338,6 +352,10 @@ function resetTeacherPassword_() {
 }
 
 function requireAuth_(sessionToken, requiredRole, allowPasswordChange) {
+  return requireAuthContext_(sessionToken, requiredRole, allowPasswordChange).account;
+}
+
+function requireAuthContext_(sessionToken, requiredRole, allowPasswordChange) {
   const token = sessionToken == null ? '' : String(sessionToken);
   if (!token) throw new Error('Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.');
   const cache = CacheService.getScriptCache();
@@ -350,7 +368,9 @@ function requireAuth_(sessionToken, requiredRole, allowPasswordChange) {
     cache.remove(key);
     throw new Error('Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.');
   }
-  const account = findAccount_(session.username);
+  const ss = spreadsheet_();
+  const accounts = readAccounts_(null, ss);
+  const account = accounts.find(function (item) { return item.username === session.username; }) || null;
   if (!account || account.status !== 'ACTIVE' || account.sessionVersion !== Number(session.sessionVersion)) {
     cache.remove(key);
     throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
@@ -359,7 +379,7 @@ function requireAuth_(sessionToken, requiredRole, allowPasswordChange) {
   if (account.mustChangePassword && !allowPasswordChange) {
     throw new Error('Bạn cần đổi mật khẩu tạm trước khi tiếp tục.');
   }
-  return account;
+  return { account: account, accounts: accounts, spreadsheet: ss };
 }
 
 function createSessionResponse_(account) {
@@ -384,7 +404,7 @@ function sessionResponse_(token, account) {
   };
 }
 
-function accountSheet_(spreadsheet) {
+function accountSheet_(spreadsheet, deferHeaderValidation) {
   const ss = spreadsheet || spreadsheet_();
   let sheet = ss.getSheetByName(AUTH.sheetName);
   if (!sheet) sheet = ss.insertSheet(AUTH.sheetName);
@@ -394,19 +414,28 @@ function accountSheet_(spreadsheet) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, AUTH.headers.length).setValues([AUTH.headers]);
   }
-  const actual = sheet.getRange(1, 1, 1, AUTH.headers.length).getDisplayValues()[0].map(function (value) { return String(value).trim(); });
-  if (AUTH.headers.some(function (header, index) { return actual[index] !== header; })) {
-    throw new Error('Cấu trúc sheet TaiKhoan không khớp. Không tự ý đổi tên hoặc sắp xếp lại cột.');
+  if (!deferHeaderValidation) {
+    const actual = sheet.getRange(1, 1, 1, AUTH.headers.length).getDisplayValues()[0].map(function (value) { return String(value).trim(); });
+    if (AUTH.headers.some(function (header, index) { return actual[index] !== header; })) {
+      throw new Error('Cấu trúc sheet TaiKhoan không khớp. Không tự ý đổi tên hoặc sắp xếp lại cột.');
+    }
   }
   if (!sheet.isSheetHidden()) sheet.hideSheet();
   return sheet;
 }
 
-function readAccounts_(existingSheet) {
-  const sheet = existingSheet || accountSheet_();
+function readAccounts_(existingSheet, spreadsheet) {
+  // Validate headers from the same range read as the account rows.
+  const sheet = existingSheet || accountSheet_(spreadsheet, true);
   const lastRow = sheet.getLastRow();
+  if (lastRow < 1) throw new Error('Sheet TaiKhoan chưa có hàng tiêu đề.');
+  const values = sheet.getRange(1, 1, lastRow, AUTH.headers.length).getValues();
+  const actual = values[0].map(function (value) { return String(value).trim(); });
+  if (AUTH.headers.some(function (header, index) { return actual[index] !== header; })) {
+    throw new Error('Cấu trúc sheet TaiKhoan không khớp. Không tự ý đổi tên hoặc sắp xếp lại cột.');
+  }
   if (lastRow < 2) return [];
-  return sheet.getRange(2, 1, lastRow - 1, AUTH.headers.length).getValues()
+  return values.slice(1)
     .filter(function (row) { return String(row[0] || '').trim(); })
     .map(function (row) {
       return {
@@ -427,14 +456,14 @@ function readAccounts_(existingSheet) {
     });
 }
 
-function findAccount_(username) {
+function findAccount_(username, spreadsheet) {
   const normalized = normalizeUsername_(username);
   if (!normalized) return null;
-  return readAccounts_().find(function (account) { return account.username === normalized; }) || null;
+  return readAccounts_(null, spreadsheet).find(function (account) { return account.username === normalized; }) || null;
 }
 
-function writeAccount_(account) {
-  const sheet = accountSheet_();
+function writeAccount_(account, spreadsheet) {
+  const sheet = accountSheet_(spreadsheet);
   const values = [
     account.username, account.role, account.studentId || '', account.displayName || '',
     account.salt, account.passwordHash, account.status,
@@ -458,7 +487,7 @@ function writeAccount_(account) {
   sheet.getRange(rowNumber, 1, 1, AUTH.headers.length).setValues([values]);
 }
 
-function insertAccount_(details) {
+function buildAccount_(details) {
   const username = normalizeUsername_(details.username);
   if (!username) throw new Error('Tên đăng nhập không hợp lệ.');
   const salt = newSalt_();
@@ -478,14 +507,29 @@ function insertAccount_(details) {
     createdAt: now,
     updatedAt: now
   };
-  writeAccount_(account);
   return account;
 }
 
-function createStudentAccount_(student, config) {
+function accountToRow_(account) {
+  return [
+    account.username, account.role, account.studentId || '', account.displayName || '',
+    account.salt, account.passwordHash, account.status,
+    Boolean(account.mustChangePassword), Number(account.failedAttempts) || 0,
+    account.lockedUntil || '', Number(account.sessionVersion) || 1,
+    account.createdAt || new Date(), account.updatedAt || new Date()
+  ];
+}
+
+function insertAccount_(details, spreadsheet) {
+  const account = buildAccount_(details);
+  writeAccount_(account, spreadsheet);
+  return account;
+}
+
+function createStudentAccount_(student, config, spreadsheet, existingAccounts) {
   const username = normalizeUsername_(student.MaHS);
   if (!username) throw new Error('Mã học sinh cần dùng làm tên đăng nhập phải gồm chữ Latin, số, dấu chấm, gạch ngang hoặc gạch dưới.');
-  const accounts = readAccounts_();
+  const accounts = existingAccounts || readAccounts_(null, spreadsheet);
   const existing = accounts.find(function (account) { return account.username === username; }) || null;
   const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
   const isActive = student.TrangThai === activeLabel;
@@ -494,7 +538,7 @@ function createStudentAccount_(student, config) {
     existing.displayName = student.HoTen || existing.displayName;
     existing.status = isActive ? 'ACTIVE' : 'INACTIVE';
     existing.updatedAt = new Date();
-    writeAccount_(existing);
+    writeAccount_(existing, spreadsheet);
     return null;
   }
   if (!isActive) return null;
@@ -510,14 +554,15 @@ function createStudentAccount_(student, config) {
     password: password,
     status: isActive ? 'ACTIVE' : 'INACTIVE',
     mustChangePassword: true
-  });
+  }, spreadsheet);
   return { username: username, password: password };
 }
 
-function assertStudentAccountCapacity_(username) {
+function assertStudentAccountCapacity_(username, spreadsheet, existingAccounts) {
   const normalized = normalizeUsername_(username);
-  if (normalized && findAccount_(normalized)) return;
-  const count = readAccounts_().filter(function (account) { return account.role === 'HOCSINH'; }).length;
+  const accounts = existingAccounts || readAccounts_(null, spreadsheet);
+  if (normalized && accounts.some(function (account) { return account.username === normalized; })) return;
+  const count = accounts.filter(function (account) { return account.role === 'HOCSINH'; }).length;
   if (count >= AUTH.maxStudents) throw new Error('Đã đủ ' + AUTH.maxStudents + ' tài khoản học sinh.');
 }
 
