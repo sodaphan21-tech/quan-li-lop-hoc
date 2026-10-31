@@ -18,7 +18,7 @@ const TABLES = Object.freeze({
   BaiTap: {
     key: 'MaBai',
     prefix: 'BT',
-    headers: ['MaBai', 'MonHoc', 'TieuDe', 'YeuCau', 'NgayGiao', 'HanNop', 'DoiTuongNhan', 'DanhSachMaHS', 'CachNop', 'DriveFileId', 'LinkTaiLieu', 'TrangThai', 'GhiChu', 'TaoLuc', 'CapNhatLuc']
+    headers: ['MaBai', 'MonHoc', 'TieuDe', 'YeuCau', 'NgayGiao', 'HanNop', 'DoiTuongNhan', 'DanhSachMaHS', 'CachNop', 'DriveFileId', 'LinkTaiLieu', 'TrangThai', 'GhiChu', 'TaoLuc', 'CapNhatLuc', 'LinkNopBai']
   },
   BaiNop: {
     key: 'MaBaiNop',
@@ -64,6 +64,12 @@ function include_(filename) {
 }
 
 /** Trả cấu hình nhẹ và số liệu cho trang Tổng quan. */
+function authorizeDriveReadAccess() {
+  requireManualOwnerRun_();
+  DriveApp.getRootFolder().getName();
+  return 'Đã cấp quyền xem Google Drive cho ứng dụng.';
+}
+
 function getBootstrap(sessionToken) {
   const context = requireAuthContext_(sessionToken, 'GIAOVIEN', false);
   const ss = context.spreadsheet;
@@ -321,6 +327,7 @@ function saveAssignment(sessionToken, payload) {
   const ss = context.spreadsheet;
   const config = readConfig_(ss);
   const id = cleanText_(payload.MaBai, 40);
+  const previous = id ? findById_('BaiTap', 'MaBai', id, ss) : null;
   const title = cleanText_(payload.TieuDe, 180);
   if (!title) throw new Error('Vui lòng nhập tiêu đề bài tập.');
 
@@ -341,12 +348,11 @@ function saveAssignment(sessionToken, payload) {
     throw new Error('Hạn nộp không thể trước ngày giao.');
   }
 
-  const methodOptions = labels_(config, LOOKUP_KEYS.submissionMethod);
-  const method = cleanText_(payload.CachNop, 100);
-  if (method) assertChoice_(method, methodOptions, 'cách nộp');
-
+  const method = 'Google Drive';
   const link = cleanText_(payload.LinkTaiLieu, 500);
   assertUrl_(link, 'Liên kết tài liệu');
+  const submissionLink = cleanText_(payload.LinkNopBai, 500);
+  assertDriveFolderUrl_(submissionLink);
 
   const statusOptions = labels_(config, LOOKUP_KEYS.assignment);
   const status = cleanText_(payload.TrangThai, 60) ||
@@ -363,9 +369,10 @@ function saveAssignment(sessionToken, payload) {
     DoiTuongNhan: recipient,
     DanhSachMaHS: recipient === selectedLabel ? ids.join(', ') : '',
     CachNop: method,
-    DriveFileId: cleanText_(payload.DriveFileId, 200),
+    DriveFileId: cleanText_(payload.DriveFileId, 200) || previous && previous.DriveFileId || '',
     LinkTaiLieu: link,
     TrangThai: status,
+    LinkNopBai: submissionLink,
     GhiChu: cleanText_(payload.GhiChu, 1000)
   };
 
@@ -408,6 +415,87 @@ function getSubmissions(sessionToken, assignmentId) {
       };
     }),
     statuses: labels_(config, LOOKUP_KEYS.submission)
+  };
+}
+
+function getDriveSubmissionCounts(sessionToken, assignmentId) {
+  const context = requireAuthContext_(sessionToken, 'GIAOVIEN', false);
+  const ss = context.spreadsheet;
+  const assignment = findById_('BaiTap', 'MaBai', cleanText_(assignmentId, 40), ss);
+  if (!assignment) throw new Error('Không tìm thấy bài tập đã chọn.');
+  if (!assignment.LinkNopBai) throw new Error('Bài tập này chưa có thư mục nhận bài trên Google Drive.');
+
+  const reference = parseDriveFolderReference_(assignment.LinkNopBai);
+  let parentFolder;
+  try {
+    parentFolder = reference.resourceKey
+      ? DriveApp.getFolderByIdAndResourceKey(reference.id, reference.resourceKey)
+      : DriveApp.getFolderById(reference.id);
+  } catch (error) {
+    throw new Error('Không đọc được thư mục nhận bài. Kiểm tra link và quyền xem của tài khoản triển khai Apps Script. ' + (error.message || ''));
+  }
+
+  const config = readConfig_(ss);
+  const activeLabel = label_(config, LOOKUP_KEYS.student, 'ACTIVE', 'Đang học');
+  const selectedLabel = label_(config, LOOKUP_KEYS.recipient, 'SELECTED_STUDENTS', 'Nhóm học sinh');
+  const allowedIds = assignment.DoiTuongNhan === selectedLabel
+    ? normalizeIds_(assignment.DanhSachMaHS)
+    : null;
+  const students = readRows_('HocSinh', ss).filter(function (student) {
+    return student.TrangThai === activeLabel && (!allowedIds || allowedIds.indexOf(student.MaHS) >= 0);
+  });
+
+  const foldersByName = {};
+  const folders = parentFolder.getFolders();
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const key = normalizeDriveFolderName_(folder.getName());
+    if (!key) continue;
+    if (!foldersByName[key]) foldersByName[key] = [];
+    foldersByName[key].push(folder);
+  }
+
+  const filePresence = {};
+  function folderHasFile_(folder) {
+    const folderId = folder.getId();
+    if (!Object.prototype.hasOwnProperty.call(filePresence, folderId)) {
+      filePresence[folderId] = folder.getFiles().hasNext();
+    }
+    return filePresence[folderId];
+  }
+
+  const studentsByName = {};
+  students.forEach(function (student) {
+    const key = normalizeDriveFolderName_(student.HoTen);
+    if (!studentsByName[key]) studentsByName[key] = [];
+    studentsByName[key].push(student);
+  });
+  const submittedById = {};
+  Object.keys(studentsByName).forEach(function (nameKey) {
+    const group = studentsByName[nameKey];
+    const namedFolders = foldersByName[nameKey] || [];
+    if (namedFolders.length) {
+      const submittedCount = Math.min(group.length, namedFolders.filter(folderHasFile_).length);
+      group.forEach(function (student, index) {
+        submittedById[student.MaHS] = index < submittedCount;
+      });
+      return;
+    }
+    group.forEach(function (student) {
+      const codeFolders = foldersByName[normalizeDriveFolderName_(student.MaHS)] || [];
+      submittedById[student.MaHS] = codeFolders.some(folderHasFile_);
+    });
+  });
+  const rows = students.map(function (student) {
+    return { MaHS: student.MaHS, HoTen: student.HoTen, DaNop: !!submittedById[student.MaHS] };
+  });
+
+  return {
+    MaBai: assignment.MaBai,
+    TieuDe: assignment.TieuDe,
+    submitted: rows.filter(function (row) { return row.DaNop; }).length,
+    total: rows.length,
+    rows: rows
   };
 }
 
@@ -622,12 +710,49 @@ function readConfig_(spreadsheet) {
   return { settings: settings, lookups: lookups };
 }
 
+function ensureAssignmentSubmissionColumn_(spreadsheet) {
+  const ss = spreadsheet || spreadsheet_();
+  const sheet = ss.getSheetByName('BaiTap');
+  if (!sheet) throw new Error('Không tìm thấy sheet BaiTap.');
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'schema_baitap_link_nop_v1_' + ss.getId();
+  if (cache.get(cacheKey) === '1') return;
+
+  const schema = TABLES.BaiTap;
+  const newColumn = schema.headers.length;
+  const newHeader = schema.headers[newColumn - 1];
+  const headerRow = sheet.getRange(1, 1, 1, newColumn).getDisplayValues()[0]
+    .map(function (header) { return String(header).trim(); });
+  const originalHeaders = schema.headers.slice(0, -1);
+  const mismatch = originalHeaders.some(function (header, index) { return headerRow[index] !== header; });
+  if (mismatch) throw new Error('Tiêu đề sheet BaiTap không khớp cấu trúc hiện tại. Không thể thêm cột LinkNopBai an toàn.');
+
+  if (headerRow[newColumn - 1] === newHeader) {
+    cache.put(cacheKey, '1', 21600);
+    return;
+  }
+  if (headerRow[newColumn - 1]) {
+    throw new Error('Cột cuối sheet BaiTap đang có tiêu đề khác. Hãy kiểm tra trước khi thêm LinkNopBai.');
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const existingValues = sheet.getRange(2, newColumn, lastRow - 1, 1).getDisplayValues();
+    if (existingValues.some(function (row) { return String(row[0] || '').trim() !== ''; })) {
+      throw new Error('Cột cuối sheet BaiTap đang có dữ liệu chưa có tiêu đề. Không thể thêm LinkNopBai an toàn.');
+    }
+  }
+  sheet.getRange(1, newColumn).setValue(newHeader);
+  cache.put(cacheKey, '1', 21600);
+}
+
 function readRows_(tableName, spreadsheet) {
   const schema = TABLES[tableName];
   if (!schema) throw new Error('Bảng dữ liệu không hợp lệ: ' + tableName);
   const ss = spreadsheet || spreadsheet_();
   const sheet = ss.getSheetByName(tableName);
   if (!sheet) throw new Error('Không tìm thấy sheet ' + tableName + '.');
+  if (tableName === 'BaiTap') ensureAssignmentSubmissionColumn_(ss);
   const lastRow = sheet.getLastRow();
   if (lastRow < 1) throw new Error('Sheet ' + tableName + ' chưa có hàng tiêu đề.');
 
@@ -658,8 +783,10 @@ function rowToRecord_(schema, row) {
 function upsertRow_(tableName, record, spreadsheet) {
   const schema = TABLES[tableName];
   if (!schema) throw new Error('Bảng dữ liệu không hợp lệ.');
-  const sheet = (spreadsheet || spreadsheet_()).getSheetByName(tableName);
+  const ss = spreadsheet || spreadsheet_();
+  const sheet = ss.getSheetByName(tableName);
   if (!sheet) throw new Error('Không tìm thấy sheet ' + tableName + '.');
+  if (tableName === 'BaiTap') ensureAssignmentSubmissionColumn_(ss);
 
   const actualHeaders = sheet.getRange(1, 1, 1, schema.headers.length).getDisplayValues()[0]
     .map(function (header) { return String(header).trim(); });
@@ -824,6 +951,34 @@ function assertStudentIds_(ids, spreadsheet) {
   readRows_('HocSinh', spreadsheet).forEach(function (row) { known[row.MaHS] = true; });
   const missing = ids.filter(function (id) { return !known[id]; });
   if (missing.length) throw new Error('Không tìm thấy mã học sinh: ' + missing.join(', '));
+}
+
+function normalizeDriveFolderName_(value) {
+  return String(value || '').trim().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('vi')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ');
+}
+
+function parseDriveFolderReference_(value) {
+  const link = cleanText_(value, 500);
+  if (!link) return null;
+  if (!/^https:\/\/drive\.google\.com\//i.test(link)) {
+    throw new Error('Hãy dán liên kết đến một thư mục Google Drive.');
+  }
+  const folderMatch = link.match(/\/folders\/([A-Za-z0-9_-]+)/i) ||
+    link.match(/\/folderview\?(?:[^#]*&)?id=([A-Za-z0-9_-]+)/i);
+  if (!folderMatch) throw new Error('Liên kết nhận bài phải trỏ đến thư mục Google Drive, không phải tệp.');
+  const resourceKeyMatch = link.match(/[?&]resourcekey=([^&#]+)/i);
+  return {
+    id: decodeURIComponent(folderMatch[1]),
+    resourceKey: resourceKeyMatch ? decodeURIComponent(resourceKeyMatch[1]) : ''
+  };
+}
+
+function assertDriveFolderUrl_(value) {
+  if (value) parseDriveFolderReference_(value);
 }
 
 function assertUrl_(value, fieldName) {

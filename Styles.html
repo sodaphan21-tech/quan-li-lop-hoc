@@ -95,4 +95,45 @@ html[data-theme="dark"] .auth-screen{background:radial-gradient(circle at 15% 10
 html[data-theme="dark"] .import-choice-card{background:var(--panel);border-color:var(--line);color:var(--ink)}
 html[data-theme="dark"] .credentials-textarea{background:var(--panel);border-color:var(--line);color:var(--ink)}
 @media(max-width:560px){.import-choice-grid{grid-template-columns:1fr}.import-choice-card{min-height:120px}.template-actions{align-items:flex-start;flex-direction:column}.import-preview-actions{flex-direction:column-reverse;align-items:stretch}.import-preview-actions .button{width:100%}}
+
+/* Version 8 refinements */
+body{background:radial-gradient(ellipse at 85% 0%,rgba(98,89,232,.035),transparent 35%),var(--canvas)}
+.sidebar{box-shadow:8px 0 28px rgba(31,43,71,.025)}
+.topbar{position:relative}
+.page-intro{margin-bottom:24px}
+.page-intro h2{font-size:19px;letter-spacing:-.45px}
+.page-intro p{line-height:1.55}
+.metric-card,.panel,.soft-card,.student-assignment-card{box-shadow:0 4px 18px rgba(31,43,71,.035)}
+.metric-card{transition:transform .18s ease,box-shadow .18s ease}
+.metric-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.panel-header{padding:19px 21px}
+.table-panel{border-radius:16px}
+thead th{padding-top:14px;padding-bottom:14px}
+tbody tr{transition:background .15s ease}
+tbody tr:hover{background:rgba(98,89,232,.035)}
+.button{letter-spacing:.05px}
+.button-small{min-height:32px;padding:0 11px;border-radius:9px;font-size:10px}
+.drive-count-button{white-space:nowrap;min-width:105px}
+.drive-count-result{background:var(--teal-soft);border-color:transparent;color:var(--teal);font-weight:800}
+.drive-method-card{display:grid;gap:6px;padding:14px 16px;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:12px;background:linear-gradient(110deg,var(--primary-soft),var(--panel) 75%)}
+.drive-method-card strong{font-size:12px;color:var(--ink)}
+.drive-method-card span{font-size:10px;color:var(--muted);line-height:1.55}
+.drive-submission-help{padding:9px 11px;border-radius:10px;background:var(--primary-soft);color:var(--ink)!important;border:1px solid color-mix(in srgb,var(--primary) 16%,transparent)}
+.student-recorded-link{display:inline-flex;margin-top:5px;color:var(--primary);font-size:10px;font-weight:700;text-decoration:none}
+.student-recorded-link:hover{text-decoration:underline}
+.student-assignment-card{padding:19px 20px;transition:border-color .18s ease,transform .18s ease}
+.student-assignment-card:hover{border-color:color-mix(in srgb,var(--primary) 24%,var(--line));transform:translateY(-1px)}
+.student-assignment-main h3{font-size:14px}
+.student-assignment-meta span{padding:4px 8px;border-radius:20px;background:var(--canvas)}
+.field input[data-date-input="true"]{font-variant-numeric:tabular-nums;letter-spacing:.1px}
+.field input[data-date-input="true"]:focus,.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 12%,transparent);outline:none}
+.toolbar{gap:11px}
+.search-box input,.filter-select{min-height:40px;border-radius:11px}
+@media(max-width:900px){.main-area{padding-left:24px;padding-right:24px}.metrics-grid{gap:11px}}
+@media(max-width:760px){.page-intro{align-items:flex-start;flex-direction:column}.page-intro>.button{width:100%}.toolbar{align-items:stretch;flex-wrap:wrap}.toolbar-spacer{display:none}.search-box,.search-box input{width:100%}.filter-select{min-width:100%}.student-assignment-top{flex-direction:column}.student-assignment-top>.row-actions{width:100%;flex-wrap:wrap}.student-assignment-top>.row-actions .button{flex:1}.table-panel table{min-width:800px}}
+html[data-theme="dark"] .sidebar{box-shadow:8px 0 28px rgba(0,0,0,.12)}
+html[data-theme="dark"] .drive-method-card{background:linear-gradient(110deg,var(--primary-soft),var(--panel) 75%)}
+html[data-theme="dark"] .student-assignment-meta span{background:rgba(255,255,255,.045)}
+html[data-theme="dark"] tbody tr:hover{background:rgba(149,140,255,.055)}
+
 </style>

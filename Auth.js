@@ -183,6 +183,7 @@ function getStudentPortalData(sessionToken) {
       HanNop: row.HanNop,
       CachNop: row.CachNop,
       LinkTaiLieu: row.LinkTaiLieu,
+      LinkNopBai: row.LinkNopBai || '',
       TrangThai: row.TrangThai,
       TrangThaiNop: submission.TrangThai || label_(config, LOOKUP_KEYS.submission, 'NOT_SUBMITTED', 'Chưa nộp'),
       LinkBaiNop: submission.LinkBaiNop || '',

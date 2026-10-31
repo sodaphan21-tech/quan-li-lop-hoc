@@ -106,7 +106,47 @@
   function dateLabel(value) {
     if (!value) return '—';
     var parts = String(value).slice(0, 10).split('-');
-    return parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : esc(value);
+    return parts.length === 3 ? Number(parts[2]) + '/' + Number(parts[1]) + '/' + parts[0] : esc(value);
+  }
+  function dateInputDisplay(value) {
+    var text = String(value || '').slice(0, 10);
+    var match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? Number(match[3]) + '/' + Number(match[2]) + '/' + match[1] : text;
+  }
+  function dateInputToIso(value) {
+    var text = String(value || '').trim();
+    if (!text) return '';
+    var match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
+    var day = Number(match[1]);
+    var month = Number(match[2]);
+    var year = Number(match[3]);
+    var date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    return String(year) + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+  function dateTimeInputDisplay(value) {
+    var text = String(value || '').trim();
+    var match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (!match) return text;
+    return Number(match[3]) + '/' + Number(match[2]) + '/' + match[1] +
+      (match[4] ? ' ' + match[4] + ':' + match[5] : '');
+  }
+  function dateTimeInputToIso(value) {
+    var text = String(value || '').trim();
+    if (!text) return '';
+    var match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+    if (!match) return null;
+    var day = Number(match[1]);
+    var month = Number(match[2]);
+    var year = Number(match[3]);
+    var hour = match[4] ? Number(match[4]) : 0;
+    var minute = match[5] ? Number(match[5]) : 0;
+    var date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return String(year) + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0') +
+      ' ' + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
   }
   function statusClass(value) {
     var v = normalize(value);
@@ -227,11 +267,15 @@
   function renderStudentAssignments(data) {
     var rows = data.assignments || [];
     document.getElementById('pageContent').innerHTML =
-      '<div class="page-intro"><div><h2>Bài tập của em</h2><p>Chỉ em và giáo viên mới xem được bài nộp này.</p></div><span class="date-small">Tổng: ' + rows.length + ' bài</span></div>' +
+      '<div class="page-intro"><div><h2>Bài tập của em</h2><p>Bài tập và nơi nộp do giáo viên giao cho em.</p></div><span class="date-small">Tổng: ' + rows.length + ' bài</span></div>' +
       (rows.length ? rows.map(function (row) {
         var link = /^https?:\/\//i.test(row.LinkTaiLieu || '') ? '<a class="button button-quiet button-small" href="' + esc(row.LinkTaiLieu) + '" target="_blank" rel="noopener noreferrer">Mở tài liệu</a>' : '';
-        var submit = row.CoTheNop ? '<button class="button button-primary button-small" data-action="submit-own-assignment" data-id="' + esc(row.MaBai) + '">' + (row.LinkBaiNop ? 'Cập nhật bài nộp' : 'Nộp bài') + '</button>' : '<span class="date-small">Bài tập đã đóng</span>';
-        return '<article class="student-assignment-card"><div class="student-assignment-top"><div class="student-assignment-main"><h3>' + esc(row.TieuDe) + '</h3><div class="student-assignment-meta"><span>' + esc(row.MonHoc || 'Chưa phân môn') + '</span><span>Hạn: ' + dateLabel(row.HanNop) + '</span><span>' + esc(row.CachNop || 'Chưa ghi cách nộp') + '</span></div><p>' + esc(row.YeuCau || 'Giáo viên chưa ghi yêu cầu chi tiết.') + '</p>' + (row.LinkBaiNop ? '<div class="student-assignment-meta"><span>' + pill(row.TrangThaiNop) + '</span><a href="' + esc(row.LinkBaiNop) + '" target="_blank" rel="noopener noreferrer">Xem bài em đã nộp</a></div>' : '<div class="student-assignment-meta">' + pill(row.TrangThaiNop) + '</div>') + (row.NhanXet ? '<p><strong>Nhận xét của giáo viên:</strong> ' + esc(row.NhanXet) + '</p>' : '') + '</div><div class="row-actions">' + link + submit + '</div></div></article>';
+        var isDriveFolder = /^https:\/\/drive\.google\.com\/(?:drive\/u\/\d+\/)?folders\//i.test(row.LinkNopBai || '') || /^https:\/\/drive\.google\.com\/folderview\?/i.test(row.LinkNopBai || '');
+        var submit = row.CoTheNop
+          ? (isDriveFolder ? '<a class="button button-primary button-small" href="' + esc(row.LinkNopBai) + '" target="_blank" rel="noopener noreferrer">Nộp bài trên Google Drive</a>' : '<span class="date-small">Giáo viên chưa thêm nơi nộp</span>')
+          : '<span class="date-small">Bài tập đã đóng</span>';
+        var recordedLink = row.LinkBaiNop ? '<a class="student-recorded-link" href="' + esc(row.LinkBaiNop) + '" target="_blank" rel="noopener noreferrer">Mở bài nộp đã ghi nhận</a>' : '';
+        return '<article class="student-assignment-card"><div class="student-assignment-top"><div class="student-assignment-main"><h3>' + esc(row.TieuDe) + '</h3><div class="student-assignment-meta"><span>' + esc(row.MonHoc || 'Chưa phân môn') + '</span><span>Hạn: ' + dateLabel(row.HanNop) + '</span><span>Google Drive</span></div><p>' + esc(row.YeuCau || 'Giáo viên chưa ghi yêu cầu chi tiết.') + '</p>' + (row.CoTheNop && isDriveFolder ? '<p class="drive-submission-help">Sau khi mở Drive, tải bài vào thư mục con mang tên em.</p>' : '') + recordedLink + (row.NhanXet ? '<p><strong>Nhận xét của giáo viên:</strong> ' + esc(row.NhanXet) + '</p>' : '') + '</div><div class="row-actions">' + link + submit + '</div></div></article>';
       }).join('') : '<section class="panel">' + emptyTable('Chưa có bài tập', 'Khi giáo viên giao bài, em sẽ thấy tại đây.') + '</section>');
   }
   function renderStudentAttendance(data) {
@@ -290,9 +334,9 @@
   function renderAssignments() {
     var rows = state.assignments || [];
     document.getElementById('pageContent').innerHTML =
-      '<div class="page-intro"><div><h2>Quản lí bài tập</h2><p>Tạo bài tập, đặt hạn nộp và theo dõi nhóm học sinh nhận bài.</p></div><button class="button button-primary" data-action="add-assignment">＋ Tạo bài tập</button></div>' +
+      '<div class="page-intro"><div><h2>Quản lí bài tập</h2><p>Giao bài, gắn tài liệu, mở thư mục nộp và theo dõi tiến độ của lớp.</p></div><button class="button button-primary" data-action="add-assignment">＋ Tạo bài tập</button></div>' +
       '<div class="toolbar"><div class="search-box"><input id="assignmentSearch" type="search" placeholder="Tìm tên bài hoặc môn học…" aria-label="Tìm bài tập"></div><select id="assignmentStatusFilter" class="filter-select"><option value="">Tất cả trạng thái</option>' + optionList(lookup('ASSIGNMENT_STATUS').map(function (x) { return x.label; }), '', false) + '</select><div class="toolbar-spacer"></div><span class="date-small">Tổng: ' + rows.length + ' bài tập</span></div>' +
-      '<section class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Bài tập</th><th>Ngày giao</th><th>Hạn nộp</th><th>Đối tượng</th><th>Trạng thái</th><th></th></tr></thead><tbody id="assignmentRows"></tbody></table></div></section>';
+      '<section class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Bài tập</th><th>Ngày giao</th><th>Hạn nộp</th><th>Đối tượng</th><th>Trạng thái</th><th>Tiến độ</th><th></th></tr></thead><tbody id="assignmentRows"></tbody></table></div></section>';
     renderAssignmentRows();
     document.getElementById('assignmentSearch').addEventListener('input', renderAssignmentRows);
     document.getElementById('assignmentStatusFilter').addEventListener('change', renderAssignmentRows);
@@ -305,8 +349,11 @@
         (!status || row.TrangThai === status);
     });
     document.getElementById('assignmentRows').innerHTML = rows.length ? rows.map(function (row) {
-      return '<tr><td><div class="assignment-title">' + esc(row.TieuDe) + '</div><span class="student-code">' + esc(row.MonHoc || 'Chưa phân môn') + '</span></td><td>' + dateLabel(row.NgayGiao) + '</td><td>' + dateLabel(row.HanNop) + '</td><td>' + esc(row.DoiTuongNhan || '—') + '</td><td>' + pill(row.TrangThai) + '</td><td><div class="row-actions"><button class="icon-action" title="Sửa bài tập" aria-label="Sửa bài tập" data-action="edit-assignment" data-id="' + esc(row.MaBai) + '">' + icons.edit + '</button></div></td></tr>';
-    }).join('') : '<tr><td colspan="6">' + emptyTable('Chưa có bài tập', 'Tạo bài tập đầu tiên để theo dõi tiến độ nộp.') + '</td></tr>';
+      var progress = row.LinkNopBai
+        ? '<button class="button button-quiet button-small drive-count-button" data-action="count-drive-submissions" data-id="' + esc(row.MaBai) + '" title="Đếm tệp trong thư mục từng học sinh">Đếm bài nộp</button>'
+        : '<span class="date-small">Chưa có thư mục Drive</span>';
+      return '<tr><td><div class="assignment-title">' + esc(row.TieuDe) + '</div><span class="student-code">' + esc(row.MonHoc || 'Chưa phân môn') + '</span></td><td>' + dateLabel(row.NgayGiao) + '</td><td>' + dateLabel(row.HanNop) + '</td><td>' + esc(row.DoiTuongNhan || '—') + '</td><td>' + pill(row.TrangThai) + '</td><td>' + progress + '</td><td><div class="row-actions"><button class="icon-action" title="Sửa bài tập" aria-label="Sửa bài tập" data-action="edit-assignment" data-id="' + esc(row.MaBai) + '">' + icons.edit + '</button></div></td></tr>';
+    }).join('') : '<tr><td colspan="7">' + emptyTable('Chưa có bài tập', 'Tạo bài tập đầu tiên để theo dõi tiến độ nộp.') + '</td></tr>';
   }
 
   function renderSubmissions(selectedId) {
@@ -336,7 +383,7 @@
       document.getElementById('submissionContent').innerHTML = rows.length ?
         '<div class="table-scroll"><table class="submission-table"><thead><tr><th>Học sinh</th><th>Trạng thái</th><th>Thời gian nộp</th><th>Liên kết bài làm</th><th>Nhận xét</th><th></th></tr></thead><tbody>' +
           rows.map(function (row) {
-            return '<tr data-student-id="' + esc(row.MaHS) + '"><td><div class="student-name">' + esc(row.HoTen) + '</div><span class="student-code">' + esc(row.MaHS) + '</span></td><td><select data-field="TrangThai">' + optionList(statuses, row.TrangThai, false) + '</select></td><td><input data-field="ThoiGianNop" type="datetime-local" value="' + esc(String(row.ThoiGianNop || '').replace(' ', 'T')) + '"></td><td><input data-field="LinkBaiNop" type="url" placeholder="https://…" value="' + esc(row.LinkBaiNop) + '"></td><td><input data-field="NhanXet" type="text" placeholder="Nhận xét ngắn" value="' + esc(row.NhanXet) + '"></td><td><button class="button button-quiet button-small" data-action="save-submission" data-id="' + esc(row.MaHS) + '">Lưu</button></td></tr>';
+            return '<tr data-student-id="' + esc(row.MaHS) + '"><td><div class="student-name">' + esc(row.HoTen) + '</div><span class="student-code">' + esc(row.MaHS) + '</span></td><td><select data-field="TrangThai">' + optionList(statuses, row.TrangThai, false) + '</select></td><td><input data-field="ThoiGianNop" type="text" inputmode="numeric" placeholder="d/m/yyyy hh:mm" value="' + esc(dateTimeInputDisplay(row.ThoiGianNop)) + '"></td><td><input data-field="LinkBaiNop" type="url" placeholder="https://…" value="' + esc(row.LinkBaiNop) + '"></td><td><input data-field="NhanXet" type="text" placeholder="Nhận xét ngắn" value="' + esc(row.NhanXet) + '"></td><td><button class="button button-quiet button-small" data-action="save-submission" data-id="' + esc(row.MaHS) + '">Lưu</button></td></tr>';
           }).join('') + '</tbody></table></div>' :
         emptyTable('Chưa có học sinh nhận bài', 'Kiểm tra đối tượng nhận trong thông tin bài tập.');
     }).catch(function (error) {
@@ -397,9 +444,15 @@
   }
   function field(label, name, value, type, required, hint, full) {
     var fieldClass = 'field' + (full ? ' field-full' : '');
-    var input = type === 'textarea' ?
-      '<textarea name="' + esc(name) + '" ' + (required ? 'required' : '') + '>' + esc(value || '') + '</textarea>' :
-      '<input name="' + esc(name) + '" type="' + esc(type || 'text') + '" value="' + esc(value || '') + '" ' + (required ? 'required' : '') + '>';
+    var input;
+    if (type === 'textarea') {
+      input = '<textarea name="' + esc(name) + '" ' + (required ? 'required' : '') + '>' + esc(value || '') + '</textarea>';
+    } else if (type === 'date') {
+      input = '<input name="' + esc(name) + '" type="text" inputmode="numeric" placeholder="d/m/yyyy" pattern="[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}" data-date-input="true" value="' + esc(dateInputDisplay(value)) + '" ' + (required ? 'required' : '') + '>';
+      hint = hint || 'Nhập theo ngày/tháng/năm, ví dụ 5/9/2026.';
+    } else {
+      input = '<input name="' + esc(name) + '" type="' + esc(type || 'text') + '" value="' + esc(value || '') + '" ' + (required ? 'required' : '') + '>';
+    }
     return '<div class="' + fieldClass + '"><label>' + esc(label) + (required ? ' *' : '') + '</label>' + input + (hint ? '<small>' + esc(hint) + '</small>' : '') + '</div>';
   }
   function selectField(label, name, options, value, required, full) {
@@ -563,9 +616,9 @@
       field('Yêu cầu', 'YeuCau', row.YeuCau, 'textarea', false, '', true) +
       selectField('Đối tượng nhận', 'DoiTuongNhan', lookup('RECIPIENT_TYPE').map(function (x) { return x.label; }), row.DoiTuongNhan || lookup('RECIPIENT_TYPE')[0] && lookup('RECIPIENT_TYPE')[0].label, true) +
       field('Mã học sinh nhận bài', 'DanhSachMaHS', row.DanhSachMaHS, 'text', false, 'Chỉ dùng khi chọn nhóm học sinh. Có thể phân cách bằng dấu phẩy.') +
-      selectField('Cách nộp', 'CachNop', lookup('SUBMISSION_METHOD').map(function (x) { return x.label; }), row.CachNop, false) +
+      '<div class="drive-method-card field-full"><strong>Cách nộp: Google Drive</strong><span>Học sinh dùng nút nộp trong tài khoản để mở thư mục Drive của bài.</span></div>' +
       field('Liên kết tài liệu', 'LinkTaiLieu', row.LinkTaiLieu, 'url', false, 'Nhập đường liên kết bắt đầu bằng https://', true) +
-      field('Drive File ID', 'DriveFileId', row.DriveFileId, 'text', false) +
+      field('Thư mục nhận bài trên Google Drive', 'LinkNopBai', row.LinkNopBai, 'url', false, 'Dán link thư mục riêng của bài; bên trong có thư mục con đặt theo tên học sinh. Tài khoản triển khai cần có quyền xem để đếm tệp.', true) +
       selectField('Trạng thái', 'TrangThai', lookup('ASSIGNMENT_STATUS').map(function (x) { return x.label; }), row.TrangThai || lookup('ASSIGNMENT_STATUS')[0] && lookup('ASSIGNMENT_STATUS')[0].label, true) +
       field('Ghi chú', 'GhiChu', row.GhiChu, 'text', false) +
       '</div>');
@@ -608,13 +661,23 @@
 
   function formObject(form) {
     var result = {};
-    new FormData(form).forEach(function (value, key) { result[key] = value; });
+    var dateFields = ['NgayGiao', 'HanNop', 'NgayDang', 'NgayHetHan', 'Ngay'];
+    new FormData(form).forEach(function (value, key) {
+      if (dateFields.indexOf(key) >= 0) {
+        var isoDate = dateInputToIso(value);
+        if (value && !isoDate) throw new Error('Ngày phải theo dạng d/m/yyyy và là ngày hợp lệ.');
+        result[key] = isoDate || '';
+      } else {
+        result[key] = value;
+      }
+    });
     return result;
   }
   function submitForm(form) {
     var action = form.dataset.form;
     if (action === 'student-import') { previewStudentImport(form); return; }
-    var data = formObject(form);
+    var data;
+    try { data = formObject(form); } catch (error) { toast(error.message || 'Ngày chưa đúng định dạng.', 'error'); return; }
     var method = action === 'student' ? 'saveStudent' :
       action === 'assignment' ? 'saveAssignment' :
       action === 'announcement' ? 'saveAnnouncement' :
@@ -724,6 +787,23 @@
     if (action === 'add-assignment') { openAssignmentForm(); return; }
     if (action === 'add-announcement') { openAnnouncementForm(); return; }
     if (action === 'edit-student') { openStudentForm(state.students.find(function (x) { return x.MaHS === button.dataset.id; })); return; }
+    if (action === 'count-drive-submissions') {
+      var previousLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Đang đếm…';
+      callServer('getDriveSubmissionCounts', [button.dataset.id]).then(function (summary) {
+        button.textContent = summary.submitted + '/' + summary.total + ' đã nộp';
+        button.classList.add('drive-count-result');
+        button.title = summary.submitted === summary.total
+          ? 'Đã tìm thấy tệp trong thư mục của tất cả học sinh.'
+          : 'Có ' + (summary.total - summary.submitted) + ' học sinh chưa có tệp trong thư mục Drive.';
+        toast(summary.submitted + '/' + summary.total + ' học sinh đã có tệp trong thư mục Drive.', 'success');
+      }).catch(function (error) {
+        button.textContent = previousLabel;
+        toast(error.message || 'Không kiểm tra được thư mục Drive.', 'error');
+      }).finally(function () { button.disabled = false; });
+      return;
+    }
     if (action === 'edit-assignment') { openAssignmentForm(state.assignments.find(function (x) { return x.MaBai === button.dataset.id; })); return; }
     if (action === 'edit-announcement') { openAnnouncementForm(state.announcements.find(function (x) { return x.MaThongBao === button.dataset.id; })); return; }
     if (action === 'reset-student-password') {
@@ -754,12 +834,18 @@
     if (action === 'save-submission') {
       var row = button.closest('tr');
       var select = document.getElementById('submissionAssignment');
+      var rawSubmissionTime = row.querySelector('[data-field="ThoiGianNop"]').value;
+      var submissionTime = dateTimeInputToIso(rawSubmissionTime);
+      if (rawSubmissionTime && !submissionTime) {
+        toast('Ngày giờ nộp phải theo dạng d/m/yyyy hh:mm và là thời điểm hợp lệ.', 'error');
+        return;
+      }
       button.disabled = true;
       callServer('saveSubmission', [{
         MaBai: select.value,
         MaHS: button.dataset.id,
         TrangThai: row.querySelector('[data-field="TrangThai"]').value,
-        ThoiGianNop: row.querySelector('[data-field="ThoiGianNop"]').value.replace('T', ' '),
+        ThoiGianNop: submissionTime,
         LinkBaiNop: row.querySelector('[data-field="LinkBaiNop"]').value,
         NhanXet: row.querySelector('[data-field="NhanXet"]').value
       }]).then(function (result) {
