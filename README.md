@@ -2,13 +2,13 @@
 
 Ứng dụng quản lí lớp học chạy trên Google Apps Script, dùng Google Sheets làm nơi lưu dữ liệu và có giao diện riêng cho giáo viên, học sinh.
 
-## Ver 8
+## Ver 9
 
-- Hiển thị và nhập ngày theo dạng d/m/yyyy; thời điểm nộp dùng d/m/yyyy hh:mm.
-- Giáo viên gắn thư mục nhận bài Google Drive riêng cho từng bài tập.
-- Học sinh mở thư mục nộp từ nút trên trang bài tập.
-- Giáo viên đếm học sinh đã nộp bằng cách kiểm tra tệp trong thư mục con của từng học sinh.
-- Giao diện được tinh chỉnh cho máy tính, điện thoại và chế độ sáng/tối.
+- Làm mới giao diện toàn ứng dụng với bảng màu xanh lá trầm, kiểu chữ rõ ràng và hệ thống thẻ, bảng, biểu mẫu đồng nhất.
+- Tối ưu bố cục cho màn hình máy tính, máy tính bảng và điện thoại; tăng kích thước các nút thao tác.
+- Bổ sung trạng thái focus nhìn rõ, nhãn hỗ trợ trình đọc màn hình và hỗ trợ giảm chuyển động.
+- Chế độ sáng/tối có màu sắc riêng và ghi nhớ lựa chọn trên thiết bị.
+- Giữ nguyên các chức năng Ver 8: ngày d/m/yyyy, thư mục nhận bài Google Drive và đếm bài nộp theo thư mục con của từng học sinh.
 
 ## Cấu trúc thư mục nhận bài
 
@@ -19,8 +19,8 @@
 
 ## Cập nhật Apps Script
 
-1. Đẩy tệp nguồn bằng lệnh clasp push.
-2. Trong Apps Script, chạy authorizeDriveReadAccess một lần và cấp quyền xem Google Drive.
-3. Mở Triển khai → Quản lý bản triển khai, sửa bản đang dùng, chọn Phiên bản mới rồi Triển khai.
+1. Đẩy tệp nguồn bằng lệnh `clasp push`.
+2. Nếu chưa cấp quyền Drive, chạy `authorizeDriveReadAccess` một lần và cấp quyền xem Google Drive.
+3. Mở **Triển khai → Quản lý bản triển khai**, sửa bản đang dùng, chọn **Phiên bản mới** rồi triển khai.
 
-Không chạy lại initializeLoginSystem khi chỉ cập nhật mã giao diện và chức năng.
+Không chạy lại `initializeLoginSystem` khi chỉ cập nhật mã.

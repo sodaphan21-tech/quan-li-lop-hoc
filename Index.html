@@ -8,6 +8,7 @@
   <?!= include_('Styles'); ?>
 </head>
 <body>
+  <a class="skip-link" href="#pageContent">Bỏ qua điều hướng, đến nội dung</a>
   <section class="auth-screen" id="loginScreen">
     <div class="auth-card">
       <div class="brand-mark auth-brand" aria-hidden="true"><span>QL</span></div>
@@ -44,7 +45,7 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true"><span>QL</span></div>
-        <div class="brand-copy"><strong>Classroom</strong><small>QUẢN LÍ LỚP HỌC</small></div>
+        <div class="brand-copy"><strong>Lớp học</strong><small>QUẢN LÍ LỚP HỌC</small></div>
         <button class="icon-button sidebar-close" id="sidebarClose" type="button" aria-label="Đóng menu">×</button>
       </div>
 
@@ -75,18 +76,18 @@
     </aside>
 
     <div class="mobile-scrim" id="mobileScrim"></div>
-    <main class="main-area">
+    <main class="main-area" id="mainContent" tabindex="-1">
       <header class="topbar">
         <button class="icon-button menu-toggle" id="menuToggle" type="button" aria-label="Mở menu"><span class="hamburger"></span></button>
         <div class="heading-group"><div class="breadcrumb"><span>Không gian làm việc</span><span class="crumb-separator">/</span><span id="breadcrumbCurrent">Tổng quan</span></div><h1 id="pageTitle">Tổng quan</h1></div>
-        <div class="topbar-actions"><div class="date-chip"><span class="date-dot"></span><span id="todayLabel">Hôm nay</span></div><button class="button button-quiet" id="refreshButton" type="button"><span class="refresh-icon">↻</span><span>Làm mới</span></button> <button class="button button-quiet" id="themeToggle" type="button"
+        <div class="topbar-actions"><div class="date-chip"><span class="date-dot"></span><span id="todayLabel">Hôm nay</span></div><button class="button button-quiet" id="refreshButton" type="button"><span class="action-icon" data-icon="refresh" aria-hidden="true"></span><span>Làm mới</span></button> <button class="button button-quiet" id="themeToggle" type="button"
         aria-label="Chuyển sang giao diện tối"
         title="Chuyển sang giao diện tối">
-  <span class="refresh-icon" id="themeIcon">☾</span>
+  <span class="action-icon" id="themeIcon" data-icon="moon" aria-hidden="true"></span>
   <span id="themeLabel">Giao diện tối</span>
-</button><button class="button button-quiet" id="logoutButton" type="button">Đăng xuất</button> </div>
+</button><button class="button button-quiet" id="logoutButton" type="button"><span class="action-icon" data-icon="logout" aria-hidden="true"></span><span>Đăng xuất</span></button> </div>
       </header>
-      <section id="pageContent" class="page-content" aria-live="polite"></section>
+      <section id="pageContent" class="page-content" tabindex="-1" aria-live="polite" aria-label="Nội dung trang"></section>
       <footer class="app-footer"><span>Quản lí lớp học</span><span>Dữ liệu được lưu trực tiếp trong bảng tính của bạn</span></footer>
     </main>
   </div>
